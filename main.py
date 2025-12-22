@@ -16,30 +16,29 @@ from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
     TextMessage,
-    FlexMessage,
-    FlexContainer,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-# 引入自訂模組
-from src.services.gcal_service import GCalService
-from src.utils.flex_templates import (
-    generate_create_success_flex,
-    generate_overview_flex,
-)
+# 引入 Agent
+from src.agents.calendar import CalendarAgent
 
-# 1. Setup
+# 1. Setup & Production Logging
 load_dotenv()
 
-# 使用 print 代替 logger，確保在 GCP Log 一定看得到
-print("🚀 System Initializing...")
+# 設定 Logging 格式，這在 GCP Logs Explorer 會比較好讀
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger("MainGateway")
+
+logger.info("🚀 System Initializing...")
 
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
-    print("❌ Critical Error: Missing LINE Environment Variables!")
+    logger.critical("❌ Critical Error: Missing LINE Environment Variables!")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -47,14 +46,8 @@ handler = WebhookHandler(CHANNEL_SECRET)
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-3-flash-preview")
 
-calendar_service = None
-
-
-def get_calendar_service():
-    global calendar_service
-    if not calendar_service:
-        calendar_service = GCalService()
-    return calendar_service
+# Agent Instances (Singleton pattern recommended for Cloud Functions)
+calendar_agent = CalendarAgent()
 
 
 def get_gemini_response(user_text):
@@ -62,17 +55,16 @@ def get_gemini_response(user_text):
         "%Y-%m-%d %H:%M:%S"
     )
 
-    # 使用 pathlib 確保路徑正確
     current_dir = pathlib.Path(__file__).parent
     prompt_path = current_dir / "src" / "prompts" / "system_prompt.txt"
 
-    print(f"📂 Reading prompt from: {prompt_path}")
+    logger.info(f"📂 Reading prompt from: {prompt_path}")
 
     try:
         with open(prompt_path, "r", encoding="utf-8") as f:
             template = f.read()
     except Exception as e:
-        print(f"❌ Error reading prompt file: {e}")
+        logger.error(f"❌ Error reading prompt file: {e}")
         return None
 
     prompt = template.replace("{{CURRENT_TIME}}", tw_now).replace(
@@ -80,48 +72,48 @@ def get_gemini_response(user_text):
     )
 
     try:
-        print("🧠 Calling Gemini API...")
+        logger.info("🧠 Calling Gemini API...")
         response = model.generate_content(prompt)
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        print(f"🧠 Gemini Response: {clean_text}")
+        logger.info(f"🧠 Gemini Response: {clean_text}")
         return json.loads(clean_text)
     except Exception as e:
-        print(f"❌ Gemini Error: {e}")
+        logger.error(f"❌ Gemini Error: {e}")
         return None
 
 
 # 2. Cloud Function Entry
 @functions_framework.http
 def webhook(request):
-    print("📨 Webhook Triggered!")
+    # 這裡可以保留 print，因為這是最外層的 HTTP 請求紀錄，GCP 會自動捕捉 request log
+    # 但使用 logger 比較統一
 
     signature = request.headers.get("X-Line-Signature")
     body = request.get_data(as_text=True)
 
-    print(f"📨 Body received: {body}")
+    # logger.debug 只有在設定 level=DEBUG 時才會顯示，適合大量資料
+    # 這裡為了 debug 方便先用 info，上線穩定後可改 debug
+    logger.info(f"📨 Webhook Triggered. Body length: {len(body)}")
 
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
-        print("❌ Invalid Signature")
+        logger.warning("❌ Invalid Signature")
         return "Invalid signature", 400
     except Exception as e:
-        print(f"❌ Unknown Error in handler: {e}")
+        logger.error(f"❌ Unknown Error in handler: {e}")
         return "Error", 500
 
     return "OK"
 
 
-# 3. Message Handler
+# 3. Message Handler (The Router)
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    print("📍 Entering handle_message")
+    logger.info("📍 Entering handle_message")
 
     user_msg = event.message.text.strip()
-    user_id = event.source.user_id
     source_type = event.source.type
-
-    print(f"👤 User: {user_id} | Type: {source_type} | Msg: {user_msg}")
 
     # 群組喚醒詞檢查
     is_group = source_type in ["group", "room"]
@@ -129,79 +121,46 @@ def handle_message(event):
 
     if is_group:
         if not user_msg.startswith(trigger_word):
-            print(f"🔇 Group message ignored (No trigger word): {user_msg}")
             return
         user_msg = user_msg[len(trigger_word) :].strip()
-        print(f"🔔 Group trigger activated. Process content: {user_msg}")
+        logger.info(f"🔔 Group trigger activated: {user_msg}")
 
-    # 呼叫 AI
+    # Step 1: 呼叫 AI 判斷意圖
     analysis = get_gemini_response(user_msg)
     if not analysis:
-        print("⚠️ Gemini returned None, stopping.")
         return
 
+    # 相容性處理 (intent/action)
     action = analysis.get("action") or analysis.get("intent")
     params = analysis.get("params") or analysis.get("parameters") or {}
 
-    print(f"🤖 Action: {action}")
+    logger.info(f"🤖 Routed Action: {action}")
 
     reply_messages = []
-    cal = get_calendar_service()
-    action = analysis.get("action")
-    params = analysis.get("params", {})
 
+    # Step 2: 路由分發 (Dispatcher)
     try:
-        if action == "create":
-            print("📅 Executing Create Event...")
-            result = cal.create_event(params)
-            if result["success"]:
-                flex_json = generate_create_success_flex(params)
-                reply_messages.append(
-                    FlexMessage(
-                        alt_text="行程已建立",
-                        contents=FlexContainer.from_dict(flex_json),
-                    )
-                )
-            else:
-                reply_messages.append(
-                    TextMessage(text=f"❌ 建立失敗: {result['message']}")
-                )
+        # [Route 1] Calendar Agent
+        # 目前我們的 Prompt 還沒區分 Domain，所以先假設 create/query/batch_create 都是 Calendar
+        # 未來加入 Expense 時，我們會在 Prompt 裡區分 action 為 'calendar_create' 或 'expense_create'
+        if action in ["create", "batch_create", "query", "delete"]:
+            reply_messages = calendar_agent.handle_intent(action, params)
 
-        elif action == "batch_create":
-            events = params.get("events", [])
-            print(f"📅 Batch creating {len(events)} events...")
-            success_count = 0
-            for evt in events:
-                if cal.create_event(evt)["success"]:
-                    success_count += 1
-            reply_messages.append(
-                TextMessage(text=f"✅ 批量建立完成！成功: {success_count} 筆")
-            )
-
-        elif action == "query":
-            print("📅 Querying events...")
-            result = cal.list_events(params.get("timeMin"), params.get("timeMax"))
-            if result["success"]:
-                flex_json = generate_overview_flex(result["events"])
-                reply_messages.append(
-                    FlexMessage(
-                        alt_text="行程總覽", contents=FlexContainer.from_dict(flex_json)
-                    )
-                )
-            else:
-                reply_messages.append(
-                    TextMessage(text=f"❌ 查詢失敗: {result['message']}")
-                )
-
+        # [Route 2] Chat / Fallback
         elif action == "chat":
             reply_messages.append(TextMessage(text=analysis.get("response", "嗯嗯")))
 
-        elif action == "delete":
-            reply_messages.append(TextMessage(text="🗑️ 刪除功能尚未實作"))
+        # [Route 3] Future Expense Agent
+        # elif action in ["expense_create", "expense_query"]:
+        #     reply_messages = expense_agent.handle_intent(action, params)
 
-        # 發送回覆
+        else:
+            logger.warning(f"⚠️ Unknown action: {action}")
+            reply_messages.append(TextMessage(text="我不太確定該怎麼處理這個指令 🤔"))
+
+        # Step 3: 發送回覆
         if reply_messages:
-            print(f"📤 Sending {len(reply_messages)} reply messages...")
+            logger.info(f"📤 Sending {len(reply_messages)} reply messages...")
             with ApiClient(configuration) as api_client:
                 line_bot_api = MessagingApi(api_client)
                 line_bot_api.reply_message(
@@ -209,9 +168,9 @@ def handle_message(event):
                         reply_token=event.reply_token, messages=reply_messages
                     )
                 )
-            print("✅ Reply sent successfully")
+            logger.info("✅ Reply sent successfully")
         else:
-            print("⚠️ No reply messages generated.")
+            logger.warning("⚠️ No reply messages generated from agents.")
 
     except Exception as e:
-        print(f"❌ Error during processing/replying: {e}")
+        logger.error(f"❌ Critical Error in Dispatcher: {e}")
