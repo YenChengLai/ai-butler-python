@@ -1,0 +1,19 @@
+# GCP Cloud Functions 框架
+functions-framework==3.*
+
+# LINE Bot SDK
+line-bot-sdk>=3.0.0
+
+# Google AI (Gemini)
+google-generativeai
+
+# Google APIs (Calendar, Sheets)
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+
+# 工具類
+python-dotenv
+pytz
+requests

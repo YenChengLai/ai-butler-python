@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+
+# Environment Variables & Keys
+.env
+*.json
+service_account.json
+
+# IDE
+.vscode/
+.idea/
