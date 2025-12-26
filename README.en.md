@@ -1,43 +1,70 @@
 # 🤖 AI Butler - Personal Smart Assistant (Python Ver.)
 
-A Serverless LINE AI Bot built with Python, powered by **Google Gemini 3.0 Flash** as its core brain. It aims to provide efficient personal assistant services at extremely low cost (near free).
+A Serverless LINE AI Bot built with Python, powered by **Google Gemini 3.0 Flash**.
+
+This project adopts the **Router-Agent-Skill** architecture pattern, separating "Intent Classification", "Parameter Parsing", and "Execution Logic" to achieve high stability and scalability.
 
 ## ✨ Core Features
 
-- **Ultra-Fast Intent Routing**: Powered by Gemini 3.0 Flash Preview, achieving intent detection latency under 0.5s.
-- **Natural Language Calendar**:
-  - Query: "What's on my schedule next week?"
-  - Create: "Dinner with Sam tomorrow at 7 PM."
-  - Batch Create: "Meeting on Monday morning, Gym on Wednesday afternoon."
-- **Serverless Architecture**: Deployed on Google Cloud Functions (Gen 2). No server management required. Pay-as-you-go (usually free for personal use).
-- **Modular Design**: Adopts an Agent pattern, making it easy to extend new features (e.g., Expense tracking, To-Do lists).
+- **Ultra-Fast Intent Routing**: Powered by Gemini 3.0 Flash Preview, creating a sub-0.5s latency router.
+- **Atomic Skills**: Business logic is encapsulated in pure Python functions, ensuring 100% execution accuracy (no dependency on AI-generated code).
+- **Natural Language Calendar Management**:
+  - **Create**: "Dinner with Sam tomorrow at 7 PM."
+  - **Query**: "What's on my schedule next week?"
+  - **Smart Reschedule**: "Delay tomorrow's meeting by 1 hour." (Auto-executes: Search -> Delete Old -> Create New).
+  - **Fuzzy Delete**: "Cancel the gym session tonight."
+  - **Batch Create**: "Meeting every Wednesday at 10 AM." (Auto-expands to specific dates for the next 4 weeks).
+- **Robustness**: Built-in argument normalization layer to automatically fix AI hallucinations (e.g., `summary` vs `title`).
+- **Serverless**: Deployed on Google Cloud Functions (Gen 2). Pay-as-you-go.
 
 ## 🛠️ Tech Stack
 
 - **Language**: Python 3.11
-- **Cloud Platform**: Google Cloud Platform (Cloud Functions Gen 2)
+- **Cloud**: Google Cloud Platform (Cloud Functions Gen 2)
 - **AI Model**: Google Gemini 3.0 Flash (Preview)
-- **Messaging Platform**: LINE Messaging API (SDK v3)
-- **Database/API**: Google Calendar API, (Google Sheets integration coming soon)
+- **Messaging**: LINE Messaging API (SDK v3)
+- **Pattern**: Router-Agent-Skill Architecture
 
-## 🏗️ System Architecture
+## 🏗️ Architecture
 
 ```mermaid
 graph TD
     User("👤 User") --> Line["LINE Platform"]
-    Line --Webhook--> Gateway["⚡ Cloud Function (Gateway)"]
+    Line --Webhook--> Gateway["⚡ Main Router (Gateway)"]
 
-    subgraph "🧠 AI Processing"
-        Gateway --"1. Intent (Router)"--> Gemini["✨ Gemini 3.0 Flash"]
+    subgraph "🧠 Intelligence Layer"
+        Gateway --"1. Classify Intent"--> RouterModel["Gemini (Router Prompt)"]
+        Gateway --"2. Dispatch"--> CalAgent["📅 Calendar Agent"]
+        CalAgent --"3. Parse Args"--> AgentModel["Gemini (Parser Prompt)"]
     end
 
-    subgraph "🤖 Agents & Services"
-        Gateway --"Action: Calendar"--> CalAgent["📅 Calendar Agent"]
-        CalAgent --"API CRUD"--> GCal["Google Calendar"]
+    subgraph "🛠️ Skills Layer (Deterministic)"
+        CalAgent --"4. Call Function"--> Skill["⚙️ Calendar Skills"]
+        Skill --"CRUD"--> GCal["Google Calendar API"]
     end
 
+    Skill --"Result"--> CalAgent
     CalAgent --"Flex Message"--> Gateway
     Gateway --"Reply"--> Line
+```
+
+## 📂 Project Structure
+
+```text
+.
+├── main.py                     # Gateway (Router) - Only responsible for intent classification
+├── src/
+│   ├── agents/                 # Agents (AI Parsers & Controllers)
+│   │   └── calendar.py         # Responsible for reading Prompt, cleaning parameters, calling Skill
+│   ├── skills/                 # Skills (Pure Python Logic)
+│   │   └── calendar.py         # Atomic tools (Create, Delete, Reschedule)
+│   ├── services/               # Drivers
+│   │   └── gcal_service.py     # Bottom-level API integration
+│   ├── prompts/                # AI System Prompts
+│   │   ├── system_prompt.txt   # Router Prompt
+│   │   └── calendar_agent.txt  # Calendar Parser Prompt
+│   └── utils/                  # Helpers & UI
+└── requirements.txt
 ```
 
 ## 🚀 Quick Start

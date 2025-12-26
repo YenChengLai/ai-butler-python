@@ -1,16 +1,21 @@
 # 🤖 AI Butler - 個人智慧管家 (Python Ver.)
 
-這是一個基於 **Serverless 架構** 的 LINE AI 機器人，核心使用 Python 開發，並採用 **Google Gemini 3.0 Flash** 作為大腦。它旨在以極低的成本（接近免費），提供高效的個人助理服務。
+這是一個基於 **Serverless 架構** 的 LINE AI 機器人，核心使用 Python 開發，並採用 **Google Gemini 3.0 Flash** 作為大腦。
+
+本專案採用 **Router-Agent-Skill** 架構模式，將「意圖判斷」、「參數解析」與「執行邏輯」分離，實現極高的穩定性與擴充性。
 
 ## ✨ 核心特色
 
-- **極速意圖判斷**：使用 Gemini 3.0 Flash Preview，路由判斷延遲低於 0.5 秒。
-- **自然語言行事曆**：
-  - 查詢：「下週有什麼行程？」
-  - 建立：「明天晚上七點跟小明吃飯。」
-  - 批次建立：「週一早上開會、週三下午去健身。」
-- **無伺服器架構**：部署於 Google Cloud Functions (Gen 2)，無須管理伺服器，按用量計費（個人使用通常免費）。
-- **模組化設計**：採用 Agent 模式，易於擴充新功能（如：記帳、待辦事項）。
+- **極速意圖判斷 (Router)**：使用 Gemini 3.0 Flash Preview，路由判斷延遲低於 0.5 秒。
+- **原子化技能 (Atomic Skills)**：將商業邏輯封裝為純 Python 函式，確保執行結果 100% 準確（不依賴 AI 寫程式）。
+- **自然語言行事曆管理**：
+  - **建立**: 「明天晚上七點跟小明吃飯」
+  - **查詢**: 「下週有什麼行程？」
+  - **智慧改期 (Reschedule)**: 「把明天的會議延後一小時」（自動執行：搜尋 -> 刪除舊行程 -> 建立新行程）。
+  - **模糊刪除 (Fuzzy Delete)**: 「取消晚上的健身課」。
+  - **批量建立**: 「每週三早上 10 點開會」（自動展開未來 4 週行程）。
+- **容錯機制 (Robustness)**：內建參數清洗層，自動修正 AI 產生的幻覺參數 (如 `summary` vs `title`)。
+- **無伺服器架構**：部署於 Google Cloud Functions (Gen 2)，按用量計費（個人使用通常免費）。
 
 ## 🛠️ 技術棧
 
@@ -18,26 +23,48 @@
 - **雲端平台**：Google Cloud Platform (Cloud Functions Gen 2)
 - **AI 模型**：Google Gemini 3.0 Flash (Preview)
 - **訊息平台**：LINE Messaging API (SDK v3)
-- **資料庫/API**：Google Calendar API, (未來整合 Google Sheets)
+- **設計模式**：Router-Agent-Skill Pattern
 
 ## 🏗️ 系統架構
 
 ```mermaid
 graph TD
     User("👤 使用者") --> Line["LINE Platform"]
-    Line --Webhook--> Gateway["⚡ Cloud Function (Gateway)"]
+    Line --Webhook--> Gateway["⚡ Main Router (Gateway)"]
 
-    subgraph "🧠 AI Processing"
-        Gateway --"1. 判斷意圖 (Router)"--> Gemini["✨ Gemini 3.0 Flash"]
+    subgraph "🧠 Intelligence Layer"
+        Gateway --"1. 分類 (Intent)"--> RouterModel["Gemini (Router Prompt)"]
+        Gateway --"2. 派發"--> CalAgent["📅 Calendar Agent"]
+        CalAgent --"3. 解析參數"--> AgentModel["Gemini (Parser Prompt)"]
     end
 
-    subgraph "🤖 Agents & Services"
-        Gateway --"Action: Calendar"--> CalAgent["📅 Calendar Agent"]
-        CalAgent --"API CRUD"--> GCal["Google Calendar"]
+    subgraph "🛠️ Skills Layer (Deterministic)"
+        CalAgent --"4. 呼叫函式"--> Skill["⚙️ Calendar Skills"]
+        Skill --"CRUD"--> GCal["Google Calendar API"]
     end
 
+    Skill --"Result"--> CalAgent
     CalAgent --"Flex Message"--> Gateway
     Gateway --"Reply"--> Line
+```
+
+## 📂 專案結構
+
+```text
+.
+├── main.py                     # Gateway (Router) - 只負責意圖分類
+├── src/
+│   ├── agents/                 # Agents (AI Parsers & Controllers)
+│   │   └── calendar.py         # 負責讀取 Prompt、清洗參數、呼叫 Skill
+│   ├── skills/                 # Skills (Pure Python Logic)
+│   │   └── calendar.py         # 原子化工具 (Create, Delete, Reschedule)
+│   ├── services/               # Drivers
+│   │   └── gcal_service.py     # Google API 底層串接
+│   ├── prompts/                # AI System Prompts
+│   │   ├── system_prompt.txt   # Router 用
+│   │   └── calendar_agent.txt  # Calendar Parser 用
+│   └── utils/                  # Helpers & UI
+└── requirements.txt
 ```
 
 ## 🚀 快速開始 (Quick Start)

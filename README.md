@@ -24,9 +24,9 @@ Please select your preferred language to read the documentation:
 ## 🚀 Key Features / 核心功能
 
 - **⚡ Ultra-Fast Routing**: Powered by **Gemini 3.0 Flash**, achieving < 0.5s intent detection.
-- **📅 Smart Calendar**: Natural language management for Google Calendar (Query, Create, Batch Create).
+- **📅 Smart Calendar**: Advanced management including **Reschedule** (Move), **Fuzzy Delete**, and **Recursive Batch Create**.
+- **🛠️ Atomic Skills**: "Router-Agent-Skill" architecture ensures deterministic execution and isolates AI hallucinations.
 - **☁️ Serverless Architecture**: Built on GCP Cloud Functions (Gen 2), optimizing cost to near **$0/month**.
-- **🛡️ Secure & Scalable**: Production-grade logging, error handling, and modular agent design.
 
 ## 📂 Project Structure
 
@@ -34,13 +34,15 @@ Please select your preferred language to read the documentation:
 .
 ├── main.py                 # Gateway Entry Point (Router)
 ├── src/
-│   ├── agents/             # AI Agents (Business Logic)
-│   │   ├── calendar.py
-│   │   └── (coming soon) expense.py
+│   ├── agents/             # AI Agents (Parser & Controller)
+│   │   └── calendar.py     # Context & Prompt management
+│   ├── skills/             # Atomic Skills (Pure Python Logic)
+│   │   └── calendar.py     # Create, Delete, Reschedule logic
 │   ├── services/           # External API Wrappers
-│   │   └── gcal_service.py
-│   ├── utils/              # Helpers & UI
-│   │   └── flex_templates.py
-│   └── prompts/            # AI System Prompts
+│   │   └── gcal_service.py # Google Calendar API Driver
+│   ├── prompts/            # AI System Prompts
+│   │   ├── system_prompt.txt   # Router Classification
+│   │   └── calendar_agent.txt  # Agent Parsing Rules
+│   └── utils/              # Helpers & UI (Flex Messages)
 └── requirements.txt
 ```
