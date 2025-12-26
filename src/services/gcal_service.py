@@ -37,31 +37,38 @@ class GCalService:
                 .insert(calendarId=self.calendar_id, body=event)
                 .execute()
             )
-            return {"success": True, "link": created_event.get("htmlLink")}
+            return {
+                "success": True,
+                "id": created_event.get("id"),
+                "link": created_event.get("htmlLink"),
+            }
         except HttpError as error:
             logger.error(f"An error occurred: {error}")
             return {"success": False, "message": str(error)}
 
     def list_events(self, time_min, time_max=None):
-        """查詢行程"""
+        """查詢行程 (用於查詢與刪除前的搜尋)"""
         try:
+            # 時區處理防呆
             if (
                 time_min
                 and "T" in time_min
-                and not (time_min.endswith("Z") or "+" in time_min)
+                and "+" not in time_min
+                and "Z" not in time_min
             ):
                 time_min += "+08:00"
-
             if (
                 time_max
                 and "T" in time_max
-                and not (time_max.endswith("Z") or "+" in time_max)
+                and "+" not in time_max
+                and "Z" not in time_max
             ):
                 time_max += "+08:00"
 
             if not time_max:
+                # 預設查 30 天 (為了涵蓋一般改期需求)
                 dt_min = datetime.datetime.fromisoformat(time_min)
-                dt_max = dt_min + datetime.timedelta(days=7)
+                dt_max = dt_min + datetime.timedelta(days=30)
                 time_max = dt_max.isoformat()
 
             events_result = (
@@ -77,11 +84,8 @@ class GCalService:
             )
             events = events_result.get("items", [])
             return {"success": True, "events": events}
-        except HttpError as error:
-            logger.error(f"An error occurred: {error}")
-            return {"success": False, "message": str(error)}
         except Exception as e:
-            logger.error(f"Unknown error in list_events: {e}")
+            logger.error(f"GCal List Error: {e}")
             return {"success": False, "message": str(e)}
 
     def delete_event(self, event_id):
@@ -92,4 +96,5 @@ class GCalService:
             ).execute()
             return {"success": True}
         except HttpError as error:
+            logger.error(f"GCal Delete Error: {error}")
             return {"success": False, "message": str(error)}
