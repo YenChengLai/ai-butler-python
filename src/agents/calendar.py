@@ -19,6 +19,27 @@ class CalendarAgent:
         self.skills = CalendarSkills()
         self.model = genai.GenerativeModel("gemini-3-flash-preview")
 
+        # ✅ 優化：在初始化時就讀入 Prompt，之後重複使用
+        # 這樣在 Cloud Functions 熱啟動 (Warm Start) 時，就不用重新讀檔，提升效能
+        self.prompt_template = self._load_prompt()
+
+    def _load_prompt(self):
+        """
+        讀取 Prompt 檔案內容。
+        """
+        current_dir = pathlib.Path(__file__).parent.parent
+        prompt_path = current_dir / "prompts" / "calendar_agent.txt"
+
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                logger.info(
+                    "✅ Calendar Prompt loaded successfully from %s", prompt_path
+                )
+                return f.read()
+        except Exception as e:
+            logger.error("❌ Error reading calendar prompt: %s", e)
+            return ""
+
     def _normalize_args(self, args):
         """
         [資料清洗] 強制將 Gemini 可能給錯的 key 轉回我們 Skill 支援的 key
@@ -43,20 +64,13 @@ class CalendarAgent:
         return new_args
 
     def handle_message(self, user_msg):
-        # 1. 讀取 Prompt
-        current_dir = pathlib.Path(__file__).parent.parent
-        prompt_path = current_dir / "prompts" / "calendar_agent.txt"
+        # 1. 檢查 Prompt 是否載入成功
+        if not self.prompt_template:
+            return [TextMessage(text="❌ 系統錯誤：Prompt 載入失敗，請檢查 Log")]
 
-        try:
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                template = f.read()
-        except Exception as e:
-            logger.error(f"Error reading calendar prompt: {e}")
-            return [TextMessage(text="❌ 無法讀取 Calendar Prompt")]
-
-        # 2. 替換變數
+        # 2. 替換變數 (使用記憶體中的 Template，無需 IO)
         dt_now = datetime.datetime.now().isoformat()
-        prompt = template.replace("{{USER_INPUT}}", user_msg).replace(
+        prompt = self.prompt_template.replace("{{USER_INPUT}}", user_msg).replace(
             "{{CURRENT_TIME}}", dt_now
         )
 
@@ -72,10 +86,10 @@ class CalendarAgent:
             # 🔥 關鍵修復：在這裡進行參數清洗
             args = self._normalize_args(raw_args)
 
-            logger.info(f"Gemini parsed: skill={skill}, args={args} (Normalized)")
+            logger.info("Gemini parsed: skill=%s, args=%s (Normalized)", skill, args)
 
         except Exception as e:
-            logger.error(f"Gemini parsing failed: {e}")
+            logger.error("Gemini parsing failed: %s", e)
             return [TextMessage(text="❌ 無法理解您的日曆指令")]
 
         # 4. Dispatch Skill
@@ -154,9 +168,9 @@ class CalendarAgent:
 
                 msg = ""
                 if result["delete_status"]["success"]:
-                    msg += f"🗑️ 舊行程已刪除\n"
+                    msg += "🗑️ 舊行程已刪除\n"
                 else:
-                    msg += f"⚠️ 找不到舊行程 (直接建立新行程)\n"
+                    msg += "⚠️ 找不到舊行程 (直接建立新行程)\n"
 
                 if result["create_status"]["success"]:
                     ui_data = {
@@ -175,7 +189,7 @@ class CalendarAgent:
                         )
                     )
                 else:
-                    msg += f"❌ 新行程建立失敗"
+                    msg += "❌ 新行程建立失敗"
                     reply_messages.append(TextMessage(text=msg))
 
             else:
@@ -183,10 +197,10 @@ class CalendarAgent:
 
         except TypeError as te:
             # 捕捉類似 unexpected keyword argument 的錯誤
-            logger.error(f"Parameter Mismatch: {te}")
+            logger.error("Parameter Mismatch: %s", te)
             reply_messages.append(TextMessage(text="❌ 參數格式錯誤，請重試"))
         except Exception as e:
-            logger.error(f"Skill execution failed: {e}")
+            logger.error("Skill execution failed: %s", e)
             reply_messages.append(TextMessage(text="❌ 執行動作時發生錯誤"))
 
         return reply_messages
