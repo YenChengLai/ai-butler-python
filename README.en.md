@@ -49,6 +49,12 @@ graph TD
         Skill --"CRUD"--> GCal["Google Calendar API"]
     end
 
+    subgraph "🔔 Scheduled Reporting (GitHub Actions)"
+        Cron["⏱️ Cron Schedule"] --> Scripts["🐍 Python Scripts\n(daily_report.py / weekly_report.py)"]
+        Scripts --"Query"--> Skill
+        Scripts --"Push Message"--> Line
+    end
+
     Skill --"Result"--> CalAgent
     CalAgent --"Flex Message"--> Gateway
     Gateway --"Reply"--> Line
