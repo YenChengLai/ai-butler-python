@@ -60,7 +60,7 @@ def get_router_intent(user_text):
         with open(prompt_path, "r", encoding="utf-8") as f:
             template = f.read()
     except Exception as e:
-        logger.error(f"❌ Error reading system prompt: {e}")
+        logger.error("❌ Error reading system prompt: %s", e)
         return "CHAT"  # 讀不到 Prompt 就當聊天
 
     # Router 不需要時間參數，只需要分類
@@ -75,7 +75,7 @@ def get_router_intent(user_text):
         intent = data.get("intent", "CHAT")
         return intent
     except Exception as e:
-        logger.error(f"❌ Router Decision Error: {e}")
+        logger.error("❌ Router Decision Error: %s", e)
         return "CHAT"
 
 
@@ -90,7 +90,7 @@ def webhook(request):
     except InvalidSignatureError:
         return "Invalid signature", 400
     except Exception as e:
-        logger.error(f"Webhook Error: {e}")
+        logger.error("Webhook Error: %s", e)
         return "Error", 500
     return "OK"
 
@@ -110,11 +110,11 @@ def handle_message(event):
             return
         user_msg = user_msg[len(trigger_word) :].strip()
 
-    logger.info(f"📨 Processing: {user_msg}")
+    logger.info("📨 Processing: %s", user_msg)
 
     # [Step 1] Router 分流 (分類)
     intent = get_router_intent(user_msg)
-    logger.info(f"🚦 Router Intent: {intent}")
+    logger.info("🚦 Router Intent: %s", intent)
 
     reply_messages = []
 
@@ -143,4 +143,4 @@ def handle_message(event):
                     )
                 )
     except Exception as e:
-        logger.error(f"❌ Dispatch Error: {e}")
+        logger.error("❌ Dispatch Error: %s", e)

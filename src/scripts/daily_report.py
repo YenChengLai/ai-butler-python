@@ -13,21 +13,18 @@ from linebot.v3.messaging import (
     TextMessage,
 )
 
-# 加入專案根目錄以讀取 src 模組
-sys.path.append(os.getcwd())
-
 from src.skills.calendar import CalendarSkills
 from src.utils.flex_templates import generate_overview_flex
 
-# 設定 Logging 為 INFO，並強制輸出到 stdout (確保 GitHub Actions 也能看到)
+
+# 強制輸出 Log，方便 GitHub Actions 除錯
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-logger = logging.getLogger("WeeklyReport")
+logger = logging.getLogger("DailyReport")
 
 
 def main():
-    logger.info("🚀 Starting Weekly Report Script (7-Days Scope)...")
+    logger.info("🚀 Starting Daily Report Script (Tomorrow's Schedule)...")
 
-    # 1. 讀取環境變數 & 檢查
     access_token = os.getenv("CHANNEL_ACCESS_TOKEN")
     target_id = os.getenv("TARGET_ID", "").strip()
 
@@ -35,29 +32,24 @@ def main():
         logger.error("❌ Critical: Missing CHANNEL_ACCESS_TOKEN or TARGET_ID")
         return
 
-    # 遮罩顯示 ID (確認讀取正確)
-    masked_id = target_id[:4] + "****" + target_id[-4:] if len(target_id) > 8 else "***"
-    logger.info("🎯 Target ID: %s", masked_id)
-
-    # 2. 計算時間範圍 (未來 7 天，含今天)
+    # 1. 計算時間範圍 (明天整天)
     tw_tz = pytz.timezone("Asia/Taipei")
     now = datetime.datetime.now(tw_tz)
 
-    # 起始時間：現在
-    time_min = now.isoformat()
+    # 明天
+    tomorrow = now + datetime.timedelta(days=1)
 
-    # 結束時間：今天 + 6 天 (共 7 天) 的 23:59:59
-    end_date = now + datetime.timedelta(days=6)
-    end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=0)
-    time_max = end_date.isoformat()
+    # 設定區間：明天 00:00:00 ~ 23:59:59
+    start_time = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_time = tomorrow.replace(hour=23, minute=59, second=59, microsecond=0)
 
-    logger.info(
-        "📅 Query Range: %s ~ %s",
-        now.strftime("%Y-%m-%d %H:%M"),
-        end_date.strftime("%Y-%m-%d %H:%M"),
-    )
+    time_min = start_time.isoformat()
+    time_max = end_time.isoformat()
 
-    # 3. 呼叫 Calendar Skill 查詢行程
+    date_str = start_time.strftime("%Y-%m-%d (%a)")
+    logger.info("📅 Querying events for Tomorrow: %s", date_str)
+
+    # 2. 呼叫 Skill
     try:
         skills = CalendarSkills()
         result = skills.list_events(time_min=time_min, time_max=time_max)
@@ -73,30 +65,30 @@ def main():
         logger.error("❌ Error during calendar skill execution: %s", e)
         return
 
-    # 4. 準備 LINE 訊息 (Flex Message)
+    # 3. 準備訊息
     messages_to_send = []
 
     if not events:
-        # 如果沒行程，傳送簡單文字
-        messages_to_send.append(TextMessage(text="📅 未來七天內沒有安排任何行程。"))
+        # 如果明天沒事，也回報一下，讓人安心
+        messages_to_send.append(
+            TextMessage(text=f"📅 明天 {date_str} 目前沒有安排行程，好好休息！")
+        )
     else:
-        # 有行程，產生漂亮的 Flex Message
         try:
             flex_json = generate_overview_flex(events)
 
-            # 客製化標題：將 "行程總覽" 改為 "未來七天行程"
-            # (防呆：檢查結構是否存在)
+            # 客製化標題
             if "header" in flex_json and "contents" in flex_json["header"]:
                 try:
                     flex_json["header"]["contents"][0]["contents"][0]["text"] = (
-                        "未來七天行程"
+                        f"明天行程 ({date_str})"
                     )
                 except (IndexError, KeyError):
                     pass
 
             messages_to_send.append(
                 FlexMessage(
-                    alt_text=f"未來七天有 {len(events)} 個行程",
+                    alt_text=f"明天有 {len(events)} 個行程",
                     contents=FlexContainer.from_dict(flex_json),
                 )
             )
@@ -104,7 +96,7 @@ def main():
             logger.error("❌ Error generating Flex JSON: %s", e)
             return
 
-    # 5. 發送 Push Message
+    # 4. 發送
     configuration = Configuration(access_token=access_token)
     try:
         logger.info("📡 Sending Push Message...")
@@ -113,13 +105,11 @@ def main():
             line_bot_api.push_message(
                 PushMessageRequest(to=target_id, messages=messages_to_send)
             )
-        logger.info("✅ Report sent successfully!")
+        logger.info("✅ Daily report sent successfully!")
 
-    except Exception as e:
-        logger.error("❌ FAILURE! Could not send message.")
-        logger.error("💥 Error Details: %s", e)
-        if hasattr(e, "body"):
-            logger.error("🔍 API Body: %s", e.body)
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("❌ FAILURE! Could not send message.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
