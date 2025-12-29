@@ -1,58 +1,117 @@
 import os
 import sys
 import logging
+import datetime
+import pytz
 from linebot.v3.messaging import (
     Configuration,
     ApiClient,
     MessagingApi,
     PushMessageRequest,
+    FlexMessage,
+    FlexContainer,
     TextMessage,
 )
 
-# 設定 Logging 為 INFO，並強制輸出到 stdout
+# 加入專案根目錄以讀取 src 模組
+sys.path.append(os.getcwd())
+
+from src.skills.calendar import CalendarSkills
+from src.utils.flex_templates import generate_overview_flex
+
+# 設定 Logging 為 INFO，並強制輸出到 stdout (確保 GitHub Actions 也能看到)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger("WeeklyReport")
 
 
 def main():
-    logger.info("🚀 Starting Weekly Report Script (Debug Mode)...")
+    logger.info("🚀 Starting Weekly Report Script (7-Days Scope)...")
 
+    # 1. 讀取環境變數 & 檢查
     access_token = os.getenv("CHANNEL_ACCESS_TOKEN")
     target_id = os.getenv("TARGET_ID", "").strip()
 
-    logger.info(f"🔑 Token Check: {'OK' if access_token else 'MISSING'}")
-
-    # 遮罩 ID 檢查
-    if target_id:
-        masked = (
-            target_id[:4] + "****" + target_id[-4:] if len(target_id) > 8 else "***"
-        )
-        logger.info(f"🎯 Target ID: {masked} (Length: {len(target_id)})")
-    else:
-        logger.error("❌ Target ID is MISSING or EMPTY!")
+    if not access_token or not target_id:
+        logger.error("❌ Critical: Missing CHANNEL_ACCESS_TOKEN or TARGET_ID")
         return
 
-    # 初始化設定
-    configuration = Configuration(access_token=access_token)
+    # 遮罩顯示 ID (確認讀取正確)
+    masked_id = target_id[:4] + "****" + target_id[-4:] if len(target_id) > 8 else "***"
+    logger.info(f"🎯 Target ID: {masked_id}")
 
+    # 2. 計算時間範圍 (未來 7 天，含今天)
+    tw_tz = pytz.timezone("Asia/Taipei")
+    now = datetime.datetime.now(tw_tz)
+
+    # 起始時間：現在
+    time_min = now.isoformat()
+
+    # 結束時間：今天 + 6 天 (共 7 天) 的 23:59:59
+    end_date = now + datetime.timedelta(days=6)
+    end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=0)
+    time_max = end_date.isoformat()
+
+    logger.info(
+        f"📅 Query Range: {now.strftime('%Y-%m-%d %H:%M')} ~ {end_date.strftime('%Y-%m-%d %H:%M')}"
+    )
+
+    # 3. 呼叫 Calendar Skill 查詢行程
     try:
-        logger.info("📡 Attempting to connect to LINE API...")
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
+        skills = CalendarSkills()
+        result = skills.list_events(time_min=time_min, time_max=time_max)
 
-            # 🔥 極簡測試：只傳純文字，排除 Flex Message 格式錯誤的可能性
-            logger.info("📤 Sending SIMPLE TEXT message...")
-            line_bot_api.push_message(
-                PushMessageRequest(
-                    to=target_id,
-                    messages=[
-                        TextMessage(
-                            text="🤖【系統測試】GitHub Action 自動排程連線成功！"
-                        )
-                    ],
+        if not result["success"]:
+            logger.error(f"❌ Calendar Query Failed: {result['message']}")
+            return
+
+        events = result["events"]
+        logger.info(f"✅ Found {len(events)} events.")
+
+    except Exception as e:
+        logger.error(f"❌ Error during calendar skill execution: {e}")
+        return
+
+    # 4. 準備 LINE 訊息 (Flex Message)
+    messages_to_send = []
+
+    if not events:
+        # 如果沒行程，傳送簡單文字
+        messages_to_send.append(TextMessage(text="📅 未來七天內沒有安排任何行程。"))
+    else:
+        # 有行程，產生漂亮的 Flex Message
+        try:
+            flex_json = generate_overview_flex(events)
+
+            # 客製化標題：將 "行程總覽" 改為 "未來七天行程"
+            # (防呆：檢查結構是否存在)
+            if "header" in flex_json and "contents" in flex_json["header"]:
+                try:
+                    flex_json["header"]["contents"][0]["contents"][0]["text"] = (
+                        "未來七天行程"
+                    )
+                except (IndexError, KeyError):
+                    pass
+
+            messages_to_send.append(
+                FlexMessage(
+                    alt_text=f"未來七天有 {len(events)} 個行程",
+                    contents=FlexContainer.from_dict(flex_json),
                 )
             )
-        logger.info("✅ SUCCESS! Message sent.")
+        except Exception as e:
+            logger.error(f"❌ Error generating Flex JSON: {e}")
+            return
+
+    # 5. 發送 Push Message
+    configuration = Configuration(access_token=access_token)
+    try:
+        logger.info("📡 Sending Push Message...")
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.push_message(
+                PushMessageRequest(to=target_id, messages=messages_to_send)
+            )
+        logger.info("✅ Report sent successfully!")
 
     except Exception as e:
         logger.error("❌ FAILURE! Could not send message.")

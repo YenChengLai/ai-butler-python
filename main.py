@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 
 from linebot.v3 import WebhookHandler
-from linebot.v3.webhook import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration,
@@ -39,16 +38,13 @@ if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
-parser = WebhookParser(CHANNEL_SECRET)
 
 # 設定 Gemini (Router 用 Flash 即可，求快)
 genai.configure(api_key=GEMINI_API_KEY)
 router_model = genai.GenerativeModel("gemini-3-flash-preview")
 
 # 初始化 Agents
-# 注意：你的 CalendarAgent 內部已經初始化了自己的 Gemini Model
 calendar_agent = CalendarAgent()
-# expense_agent = ExpenseAgent()
 
 
 def get_router_intent(user_text):
@@ -89,19 +85,12 @@ def webhook(request):
     signature = request.headers.get("X-Line-Signature")
     try:
         body = request.get_data(as_text=True)
-        events = parser.parse(body, signature)
-
-        # 🔥 【新增這段】專門用來抓 Group ID
-        for event in events:
-            if hasattr(event, "source"):
-                if getattr(event.source, "type", "") == "group":
-                    group_id = event.source.group_id
-                    # 用特殊的符號標記，讓你在 Log 一眼就看到
-                    logger.info(f"🔥🔥🔥 GROUP_ID FOUND: {group_id} 🔥🔥🔥")
+        # 直接交給 handler 處理，不需要再手動 parse 來攔截 ID 了
         handler.handle(body, signature)
     except InvalidSignatureError:
         return "Invalid signature", 400
-    except Exception:
+    except Exception as e:
+        logger.error(f"Webhook Error: {e}")
         return "Error", 500
     return "OK"
 
@@ -141,9 +130,7 @@ def handle_message(event):
             reply_messages = [TextMessage(text="💰 記帳功能建置中...")]
 
         else:
-            # CHAT 或 未知
-            # 這裡可以選擇不回話，或是回一個簡單的表情，避免太吵
-            # reply_messages = [TextMessage(text="🤔 我不太確定您的意思")]
+            # CHAT 或 未知，選擇忽略以免打擾
             pass
 
         # [Step 3] 回覆 LINE
