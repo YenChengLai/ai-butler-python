@@ -1,48 +1,74 @@
-# 🤖 AI Butler (Serverless Python Gateway)
+# 🤖 AI Butler (LINE Bot with Google Gemini & Calendar)
 
-> A smart personal assistant powered by Google Gemini 3.0 & Google Cloud Functions.
->
-> 基於 Google Gemini 3.0 與 Google Cloud Functions 打造的個人智慧管家。
+A smart personal assistant built with **Python**, **LINE Messaging API**, and **Google Gemini**. It manages your Google Calendar via natural language and sends scheduled agenda reports using GitHub Actions.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
-[![GCP](https://img.shields.io/badge/Google_Cloud-Functions-4285F4?style=flat&logo=google-cloud&logoColor=white)](https://cloud.google.com/)
-[![Gemini](https://img.shields.io/badge/AI-Gemini_3.0-8E75B2?style=flat&logo=google&logoColor=white)](https://deepmind.google/technologies/gemini/)
-[![LINE](https://img.shields.io/badge/Platform-LINE_Bot-00C300?style=flat&logo=line&logoColor=white)](https://developers.line.biz/)
+一個基於 **Python**、**LINE Messaging API** 與 **Google Gemini** 打造的智慧個人管家。它能透過自然語言管理 Google 日曆，並利用 GitHub Actions 自動發送每日與每週行程預告。
 
 ---
 
-## 🌍 Language / 語言版本
+## 🌍 Language / 語言
 
-Please select your preferred language to read the documentation:
-請選擇您偏好的語言以閱讀完整文件：
-
-- [🇹🇼 繁體中文說明 (Traditional Chinese)](./README.zh-tw.md)
-- [🇺🇸 English Documentation](./README.en.md)
+- [English](#-english-documentation)
+- [繁體中文](#-繁體中文說明)
 
 ---
 
-## 🚀 Key Features / 核心功能
+## 🇬🇧 English Documentation
 
-- **⚡ Ultra-Fast Routing**: Powered by **Gemini 3.0 Flash**, achieving < 0.5s intent detection.
-- **📅 Smart Calendar**: Advanced management including **Reschedule** (Move), **Fuzzy Delete**, and **Recursive Batch Create**.
-- **🛠️ Atomic Skills**: "Router-Agent-Skill" architecture ensures deterministic execution and isolates AI hallucinations.
-- **☁️ Serverless Architecture**: Built on GCP Cloud Functions (Gen 2), optimizing cost to near **$0/month**.
+### ✨ Features
 
-## 📂 Project Structure
+- **🧠 Smart Intent Routing**: Uses **Google Gemini (Flash model)** to classify user intent (e.g., Calendar, Chat, Expense) and route to specific agents.
+- **📅 Calendar Management**: Query and add events to Google Calendar using natural language (e.g., "Book a meeting next Monday at 10 AM").
+- **🔔 Scheduled Reports**:
+  - **Daily Report**: Sent at **21:30** every night, summarizing tomorrow's schedule.
+  - **Weekly Report**: Sent every **Sunday**, summarizing the next 7 days.
+  - Powered by **GitHub Actions** (Serverless Cron Jobs).
+- **👥 Group Chat Support**: Works in group chats! Wake it up using the trigger word **"管家" (Butler)** (e.g., "Butler, check my schedule").
+- **☁️ Cloud Native**: Deployed on **Google Cloud Functions (Gen 2)** or **Cloud Run**.
 
-```text
-.
-├── main.py                 # Gateway Entry Point (Router)
-├── src/
-│   ├── agents/             # AI Agents (Parser & Controller)
-│   │   └── calendar.py     # Context & Prompt management
-│   ├── skills/             # Atomic Skills (Pure Python Logic)
-│   │   └── calendar.py     # Create, Delete, Reschedule logic
-│   ├── services/           # External API Wrappers
-│   │   └── gcal_service.py # Google Calendar API Driver
-│   ├── prompts/            # AI System Prompts
-│   │   ├── system_prompt.txt   # Router Classification
-│   │   └── calendar_agent.txt  # Agent Parsing Rules
-│   └── utils/              # Helpers & UI (Flex Messages)
-└── requirements.txt
+### 🏗 Architecture
+
+1.  **LINE Platform** sends webhook events to **Google Cloud Function**.
+2.  **Main Router** (Gemini) analyzes the intent.
+3.  **Agents** (e.g., CalendarAgent) process the request using specific skills.
+4.  **GitHub Actions** trigger scheduled scripts (`daily_report.py`, `weekly_report.py`) to push notifications.
+
+### 🚀 Setup & Installation
+
+#### 1. Prerequisites
+
+- A LINE Official Account (with Messaging API).
+- A Google Cloud Project (enable **Calendar API**).
+- A Google Gemini API Key.
+- A Service Account JSON key for Google Calendar access.
+
+#### 2. Environment Variables (.env)
+
+Create a `.env` file locally or set these in your Cloud Function / GitHub Secrets:
+
+```bash
+CHANNEL_ACCESS_TOKEN="your_line_channel_access_token"
+CHANNEL_SECRET="your_line_channel_secret"
+GEMINI_API_KEY="your_gemini_api_key"
+CALENDAR_ID="primary" (or your specific calendar ID)
+TARGET_GROUP_ID="Cxxxxxxxx..." (The group ID to receive reports)
 ```
+
+#### 3. GitHub Actions Setup (For Reports)
+
+Go to your repository Settings > Secrets and variables > Actions and add:
+
+- CHANNEL_ACCESS_TOKEN
+- CALENDAR_ID
+- TARGET_GROUP_ID: Your User ID (U...) or Group ID (C...).
+- GCP_SA_KEY_BASE64: Base64 encoded string of your service_account.json.
+
+To generate: base64 -i service_account.json -o sa_base64.txt
+
+#### 4. How to get Group ID?
+
+The ID in the LINE OA Manager URL is NOT the API Group ID.
+
+1. Invite the bot to a group.
+2. Check your GCP Logs for the source.groupId when you send a message.
+3. Or temporarily use a debug script to echo the ID.

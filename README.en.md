@@ -2,7 +2,7 @@
 
 A Serverless LINE AI Bot built with Python, powered by **Google Gemini 3.0 Flash**.
 
-This project adopts the **Router-Agent-Skill** architecture pattern, separating "Intent Classification", "Parameter Parsing", and "Execution Logic" to achieve high stability and scalability.
+This project adopts the **Router-Agent-Skill** architecture pattern, separating "Intent Classification", "Parameter Parsing", and "Execution Logic" to achieve high stability and scalability. It also features automated scheduled reporting via GitHub Actions.
 
 ## ✨ Core Features
 
@@ -14,15 +14,21 @@ This project adopts the **Router-Agent-Skill** architecture pattern, separating 
   - **Smart Reschedule**: "Delay tomorrow's meeting by 1 hour." (Auto-executes: Search -> Delete Old -> Create New).
   - **Fuzzy Delete**: "Cancel the gym session tonight."
   - **Batch Create**: "Meeting every Wednesday at 10 AM." (Auto-expands to specific dates for the next 4 weeks).
-- **Robustness**: Built-in argument normalization layer to automatically fix AI hallucinations (e.g., `summary` vs `title`).
+- **🔔 Automated Reports**:
+  - **Daily Report**: Sent at **21:00** every night, summarizing tomorrow's schedule.
+  - **Weekly Report**: Sent every **Sunday**, summarizing the next 7 days.
+  - Powered by **GitHub Actions** (Serverless Cron Jobs).
+- **👥 Group Chat Support**: Works in group chats! Wake it up using the trigger word **"Butler"** or **"管家"** (e.g., "Butler, check my schedule").
+- **Robustness**: Built-in argument normalization layer to automatically fix AI hallucinations.
 - **Serverless**: Deployed on Google Cloud Functions (Gen 2). Pay-as-you-go.
 
 ## 🛠️ Tech Stack
 
 - **Language**: Python 3.11
-- **Cloud**: Google Cloud Platform (Cloud Functions Gen 2)
+- **Cloud**: Google Cloud Platform (Cloud Functions Gen 2, Cloud Run)
 - **AI Model**: Google Gemini 3.0 Flash (Preview)
 - **Messaging**: LINE Messaging API (SDK v3)
+- **CI/CD**: GitHub Actions (for Scheduled Cron Jobs)
 - **Pattern**: Router-Agent-Skill Architecture
 
 ## 🏗️ Architecture
@@ -53,17 +59,22 @@ graph TD
 ```text
 .
 ├── main.py                     # Gateway (Router) - Only responsible for intent classification
+├── .github/
+│   └── workflows/              # GitHub Actions
+│       ├── daily_notify.yml    # Daily Schedule Cron
+│       └── weekly_notify.yml   # Weekly Schedule Cron
 ├── src/
 │   ├── agents/                 # Agents (AI Parsers & Controllers)
-│   │   └── calendar.py         # Responsible for reading Prompt, cleaning parameters, calling Skill
+│   │   └── calendar.py
 │   ├── skills/                 # Skills (Pure Python Logic)
-│   │   └── calendar.py         # Atomic tools (Create, Delete, Reschedule)
+│   │   └── calendar.py
+│   ├── scripts/                # Standalone Scripts for Reports
+│   │   ├── daily_report.py
+│   │   └── weekly_report.py
 │   ├── services/               # Drivers
 │   │   └── gcal_service.py     # Bottom-level API integration
 │   ├── prompts/                # AI System Prompts
-│   │   ├── system_prompt.txt   # Router Prompt
-│   │   └── calendar_agent.txt  # Calendar Parser Prompt
-│   └── utils/                  # Helpers & UI
+│   └── utils/                  # Helpers & UI (Flex Messages)
 └── requirements.txt
 ```
 
@@ -73,6 +84,7 @@ graph TD
 
 - Python 3.11+
 - Google Cloud Platform account (enable Cloud Functions, Cloud Build, Calendar API)
+- Service Account: Create a Service Account in GCP, download the JSON key, and grant it access to your Calendar.
 - LINE Developers Channel (Messaging API)
 - Google AI Studio API Key (Gemini)
 
@@ -117,7 +129,25 @@ graph TD
    --set-env-vars="CHANNEL_ACCESS_TOKEN=...,CHANNEL_SECRET=...,GEMINI_API_KEY=...,CALENDAR_ID=..."
    ```
 
-5. **Usage Examples**
+5. **Setting up Scheduled Reports (GitHub Actions)**
+
+To enable the Daily/Weekly reports, you need to configure GitHub Secrets:
+
+1. Go to your repository Settings > Secrets and variables > Actions.
+2. Add the following secrets:
+
+- CHANNEL_ACCESS_TOKEN: Your LINE Channel Access Token.
+- CALENDAR_ID: Your Google Calendar ID (e.g., primary).
+- TARGET_GROUP_ID: The LINE Group ID (starts with C) or User ID (U) where reports will be sent.
+- GCP_SA_KEY_BASE64: Your GCP Service Account JSON encoded in Base64.
+  - Command to generate: base64 -i service_account.json -o sa_base64.txt (Copy the content of the txt file).
+
+💡 **Tip: How to get the Group ID?** The ID in the LINE OA Manager URL is NOT the API Group ID.
+
+    1. Invite the bot to a group.
+    2. Check your GCP Logs for the source.groupId when you send a message.
+
+## 📝 Usage Examples
 
 - **Add Event**: "Butler, take my son to get vaccinated tomorrow at 3 PM"
 - **Query Schedule**: "Butler, what's on the schedule this week?"
