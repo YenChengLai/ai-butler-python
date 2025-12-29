@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 
 from linebot.v3 import WebhookHandler
+from linebot.v3.webhook import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration,
@@ -38,6 +39,7 @@ if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
+parser = WebhookParser(CHANNEL_SECRET)
 
 # 設定 Gemini (Router 用 Flash 即可，求快)
 genai.configure(api_key=GEMINI_API_KEY)
@@ -85,9 +87,17 @@ def get_router_intent(user_text):
 @functions_framework.http
 def webhook(request):
     signature = request.headers.get("X-Line-Signature")
-    body = request.get_data(as_text=True)
-
     try:
+        body = request.get_data(as_text=True)
+        events = parser.parse(body, signature)
+
+        # 🔥 【新增這段】專門用來抓 Group ID
+        for event in events:
+            if hasattr(event, "source"):
+                if getattr(event.source, "type", "") == "group":
+                    group_id = event.source.group_id
+                    # 用特殊的符號標記，讓你在 Log 一眼就看到
+                    logger.info(f"🔥🔥🔥 GROUP_ID FOUND: {group_id} 🔥🔥🔥")
         handler.handle(body, signature)
     except InvalidSignatureError:
         return "Invalid signature", 400
