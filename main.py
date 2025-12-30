@@ -19,7 +19,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 # 引入你的 Agent
 from src.agents.calendar import CalendarAgent
-# from src.agents.expense import ExpenseAgent # 未來啟用
+from src.agents.expense import ExpenseAgent
 
 # 1. Setup & Config
 load_dotenv()
@@ -45,6 +45,7 @@ router_model = genai.GenerativeModel("gemini-3-flash-preview")
 
 # 初始化 Agents
 calendar_agent = CalendarAgent()
+expense_agent = ExpenseAgent()
 
 
 def get_router_intent(user_text):
@@ -126,9 +127,10 @@ def handle_message(event):
             reply_messages = calendar_agent.handle_message(user_msg)
 
         elif intent == "EXPENSE":
-            # reply_messages = expense_agent.handle_message(user_msg, event.source.user_id)
-            reply_messages = [TextMessage(text="💰 記帳功能建置中...")]
-
+            # 傳入 user_id 是為了未來擴充 (例如多人記帳時分辨是誰付的)
+            reply_messages = expense_agent.handle_message(
+                user_msg, user_id=event.source.user_id
+            )
         else:
             # CHAT 或 未知，選擇忽略以免打擾
             pass

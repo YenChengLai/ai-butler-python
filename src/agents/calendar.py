@@ -4,12 +4,11 @@ import datetime
 import pathlib
 import google.generativeai as genai
 from linebot.v3.messaging import TextMessage, FlexMessage, FlexContainer
-from src.services.gcal_service import GCalService
 from src.utils.flex_templates import (
     generate_create_success_flex,
     generate_overview_flex,
 )
-from src.skills.calendar import CalendarSkills
+from src.skills.calendar_skill import CalendarSkills
 
 logger = logging.getLogger(__name__)
 

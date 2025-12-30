@@ -13,7 +13,7 @@ from linebot.v3.messaging import (
     TextMessage,
 )
 
-from src.skills.calendar import CalendarSkills
+from src.skills.calendar_skill import CalendarSkills
 from src.utils.flex_templates import generate_overview_flex
 
 

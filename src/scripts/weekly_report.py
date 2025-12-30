@@ -16,7 +16,7 @@ from linebot.v3.messaging import (
 # 加入專案根目錄以讀取 src 模組
 sys.path.append(os.getcwd())
 
-from src.skills.calendar import CalendarSkills
+from src.skills.calendar_skills import CalendarSkills
 from src.utils.flex_templates import generate_overview_flex
 
 # 設定 Logging 為 INFO，並強制輸出到 stdout (確保 GitHub Actions 也能看到)
