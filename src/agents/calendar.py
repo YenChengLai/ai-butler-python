@@ -19,7 +19,6 @@ class CalendarAgent:
         self.model = genai.GenerativeModel("gemini-3-flash-preview")
 
         # ✅ 優化：在初始化時就讀入 Prompt，之後重複使用
-        # 這樣在 Cloud Functions 熱啟動 (Warm Start) 時，就不用重新讀檔，提升效能
         self.prompt_template = self._load_prompt()
 
     def _load_prompt(self):
@@ -50,7 +49,6 @@ class CalendarAgent:
             new_args["title"] = new_args.pop("summary")
 
         # 2. 處理時間 (camelCase vs snake_case 防呆)
-        # 雖然 Prompt 規定 start_time，但防萬一它給 startTime
         if "startTime" in new_args and "start_time" not in new_args:
             new_args["start_time"] = new_args.pop("startTime")
         if "endTime" in new_args and "end_time" not in new_args:
@@ -67,139 +65,169 @@ class CalendarAgent:
         if not self.prompt_template:
             return [TextMessage(text="❌ 系統錯誤：Prompt 載入失敗，請檢查 Log")]
 
-        # 2. 替換變數 (使用記憶體中的 Template，無需 IO)
+        # 2. 替換變數
         dt_now = datetime.datetime.now().isoformat()
         prompt = self.prompt_template.replace("{{USER_INPUT}}", user_msg).replace(
             "{{CURRENT_TIME}}", dt_now
         )
 
-        # 3. Call Gemini
+        # 3. Call Gemini (Parsing)
+        actions_list = []
         try:
             response = self.model.generate_content(prompt)
             clean_text = response.text.replace("```json", "").replace("```", "").strip()
-            data = json.loads(clean_text)
 
-            skill = data.get("skill")
-            raw_args = data.get("args", {})
+            # 解析 JSON List
+            parsed_data = json.loads(clean_text)
 
-            # 🔥 關鍵修復：在這裡進行參數清洗
-            args = self._normalize_args(raw_args)
+            # 防呆：如果 AI 還是只回傳單一 Dict (偶爾會發生)，把它包成 List
+            if isinstance(parsed_data, dict):
+                actions_list = [parsed_data]
+            elif isinstance(parsed_data, list):
+                actions_list = parsed_data
+            else:
+                raise ValueError("AI returned neither Dict nor List")
 
-            logger.info("Gemini parsed: skill=%s, args=%s (Normalized)", skill, args)
+            logger.info("🤖 Gemini Parsed Actions List: %s", actions_list)
 
         except Exception as e:
             logger.error("Gemini parsing failed: %s", e)
-            return [TextMessage(text="❌ 無法理解您的日曆指令")]
+            return [TextMessage(text="😵‍💫 抱歉，我不確定您的指令，請再試一次。")]
 
-        # 4. Dispatch Skill
+        # 4. Dispatch Skills (Loop Processing)
         reply_messages = []
 
-        try:
-            if skill == "create_event":
-                # 直接使用清洗過的 args
-                result = self.skills.create_event(**args)
-                if result["success"]:
-                    # 準備給 UI 用的資料 (Flex Template 需要 startTime/endTime/title)
-                    ui_data = {
-                        "title": args.get("title"),
-                        "startTime": args.get("start_time"),
-                        "endTime": args.get("end_time"),
-                        "location": args.get("location", ""),
-                    }
-                    flex_json = generate_create_success_flex(ui_data)
+        # 遍歷每一個 Action
+        for action_data in actions_list:
+            skill = action_data.get("skill")
+            raw_args = action_data.get("args", {})
+
+            # 參數清洗
+            args = self._normalize_args(raw_args)
+
+            logger.info("⚡ Executing Skill: %s | Args: %s", skill, args)
+
+            try:
+                if skill == "create_event":
+                    result = self.skills.create_event(**args)
+                    if result["success"]:
+                        ui_data = {
+                            "title": args.get("title"),
+                            "startTime": args.get("start_time"),
+                            "endTime": args.get("end_time"),
+                            "location": args.get("location", ""),
+                        }
+                        flex_json = generate_create_success_flex(ui_data)
+                        reply_messages.append(
+                            FlexMessage(
+                                alt_text=f"行程已建立: {args.get('title')}",
+                                contents=FlexContainer.from_dict(flex_json),
+                            )
+                        )
+                    else:
+                        reply_messages.append(
+                            TextMessage(
+                                text=f"❌ 建立失敗 ({args.get('title')}): {result.get('message')}"
+                            )
+                        )
+
+                elif skill == "batch_create":
+                    # Batch 處理 (如果 Prompt 回傳這種類型)
+                    # 註：新的 Prompt 通常會直接展開成多個 create_event，但保留此邏輯以防萬一
+                    raw_events = args.get("events", [])
+                    if not isinstance(raw_events, list):
+                        raw_events = [args]
+
+                    success_count = 0
+                    for evt in raw_events:
+                        clean_evt = self._normalize_args(evt)
+                        if self.skills.create_event(**clean_evt)["success"]:
+                            success_count += 1
+
                     reply_messages.append(
-                        FlexMessage(
-                            alt_text="行程已建立",
-                            contents=FlexContainer.from_dict(flex_json),
+                        TextMessage(
+                            text=f"✅ 批量建立完成！共建立 {success_count} 筆行程"
                         )
                     )
-                else:
-                    reply_messages.append(
-                        TextMessage(text=f"❌ 建立失敗: {result.get('message')}")
-                    )
 
-            elif skill == "batch_create":
-                # Batch 處理
-                raw_events = args.get("events", [])
-                if not isinstance(raw_events, list):
-                    raw_events = [args]  # 防呆
-
-                success_count = 0
-                for evt in raw_events:
-                    # 🔥 每一筆 event 也要清洗
-                    clean_evt = self._normalize_args(evt)
-                    if self.skills.create_event(**clean_evt)["success"]:
-                        success_count += 1
-
-                reply_messages.append(
-                    TextMessage(text=f"✅ 批量建立完成！共建立 {success_count} 筆行程")
-                )
-
-            elif skill == "list_events":
-                result = self.skills.list_events(**args)
-                if result["success"]:
-                    flex_json = generate_overview_flex(result["events"])
-                    reply_messages.append(
-                        FlexMessage(
-                            alt_text="行程總覽",
-                            contents=FlexContainer.from_dict(flex_json),
+                elif skill == "list_events":
+                    result = self.skills.list_events(**args)
+                    if result["success"]:
+                        # 避免一次查詢產生太多 Flex Message，這裡通常只有一個查詢指令
+                        flex_json = generate_overview_flex(result["events"])
+                        reply_messages.append(
+                            FlexMessage(
+                                alt_text="行程總覽",
+                                contents=FlexContainer.from_dict(flex_json),
+                            )
                         )
-                    )
-                else:
-                    reply_messages.append(
-                        TextMessage(text=f"❌ 查詢失敗: {result.get('message')}")
-                    )
-
-            elif skill == "delete_event":
-                result = self.skills.delete_event_by_query(**args)
-                if result["success"]:
-                    deleted_title = result["deleted_event"].get("summary", "行程")
-                    reply_messages.append(
-                        TextMessage(text=f"🗑️ 已刪除行程：{deleted_title}")
-                    )
-                else:
-                    reply_messages.append(
-                        TextMessage(text=f"❌ 刪除失敗：{result['message']}")
-                    )
-
-            elif skill == "reschedule_event":
-                result = self.skills.reschedule_event(**args)
-
-                msg = ""
-                if result["delete_status"]["success"]:
-                    msg += "🗑️ 舊行程已刪除\n"
-                else:
-                    msg += "⚠️ 找不到舊行程 (直接建立新行程)\n"
-
-                if result["create_status"]["success"]:
-                    ui_data = {
-                        "title": args.get("new_title"),
-                        "startTime": args.get("new_start_time"),
-                        "endTime": args.get(
-                            "new_end_time"
-                        ),  # Flex Template 其實沒用到 endTime 顯示，但傳入無妨
-                    }
-                    # 這裡為了簡單，重複使用 create success template
-                    flex_json = generate_create_success_flex(ui_data)
-                    reply_messages.append(
-                        FlexMessage(
-                            alt_text="行程已改期",
-                            contents=FlexContainer.from_dict(flex_json),
+                    else:
+                        reply_messages.append(
+                            TextMessage(text=f"❌ 查詢失敗: {result.get('message')}")
                         )
-                    )
+
+                elif skill == "delete_event":
+                    result = self.skills.delete_event_by_query(**args)
+                    if result["success"]:
+                        deleted_title = result["deleted_event"].get("summary", "行程")
+                        # 為了避免洗版，刪除通常用簡單文字回覆
+                        reply_messages.append(
+                            TextMessage(text=f"🗑️ 已刪除：{deleted_title}")
+                        )
+                    else:
+                        reply_messages.append(
+                            TextMessage(text=f"⚠️ 刪除失敗：{result['message']}")
+                        )
+
+                elif skill == "reschedule_event":
+                    result = self.skills.reschedule_event(**args)
+
+                    # 組合文字訊息
+                    status_msg = ""
+                    if result["delete_status"]["success"]:
+                        status_msg += "🗑️ 舊行程已刪除\n"
+                    else:
+                        status_msg += "⚠️ 找不到舊行程 (直接建立新行程)\n"
+
+                    if result["create_status"]["success"]:
+                        # 如果成功，使用 Flex Message 展示新行程
+                        ui_data = {
+                            "title": args.get("new_title"),
+                            "startTime": args.get("new_start_time"),
+                            "endTime": args.get("new_end_time"),
+                        }
+                        flex_json = generate_create_success_flex(ui_data)
+
+                        # 先把舊行程刪除的狀態用文字送出 (可選，或合併)
+                        # 這裡選擇直接送出 Flex，標題寫「行程已改期」
+                        reply_messages.append(
+                            FlexMessage(
+                                alt_text="行程已改期",
+                                contents=FlexContainer.from_dict(flex_json),
+                            )
+                        )
+                    else:
+                        status_msg += "❌ 新行程建立失敗"
+                        reply_messages.append(TextMessage(text=status_msg))
+
                 else:
-                    msg += "❌ 新行程建立失敗"
-                    reply_messages.append(TextMessage(text=msg))
+                    reply_messages.append(TextMessage(text=f"🤔 未知指令: {skill}"))
 
-            else:
-                reply_messages.append(TextMessage(text=f"🤔 尚未支援的技能: {skill}"))
+            except TypeError as te:
+                logger.error("Parameter Mismatch in %s: %s", skill, te)
+                reply_messages.append(TextMessage(text=f"❌ {skill} 參數錯誤"))
+            except Exception as e:
+                logger.error("Skill execution failed (%s): %s", skill, e)
+                reply_messages.append(TextMessage(text=f"❌ 執行 {skill} 時發生錯誤"))
 
-        except TypeError as te:
-            # 捕捉類似 unexpected keyword argument 的錯誤
-            logger.error("Parameter Mismatch: %s", te)
-            reply_messages.append(TextMessage(text="❌ 參數格式錯誤，請重試"))
-        except Exception as e:
-            logger.error("Skill execution failed: %s", e)
-            reply_messages.append(TextMessage(text="❌ 執行動作時發生錯誤"))
+        # 限制回傳訊息數量
+        # LINE 一次最多只能回傳 5 則訊息。如果超過，我們只取前 5 則，並加註提示。
+        if len(reply_messages) > 5:
+            reply_messages = reply_messages[:4]
+            reply_messages.append(TextMessage(text="⚠️ 指令過多，僅顯示前 4 筆結果。"))
+
+        # 如果沒有任何結果 (例如解析出來是空陣列)
+        if not reply_messages:
+            return [TextMessage(text="❓ 系統無法識別任何有效操作")]
 
         return reply_messages
