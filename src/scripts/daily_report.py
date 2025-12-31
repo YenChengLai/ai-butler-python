@@ -26,10 +26,10 @@ def main():
     logger.info("🚀 Starting Daily Report Script (Tomorrow's Schedule)...")
 
     access_token = os.getenv("CHANNEL_ACCESS_TOKEN")
-    target_id = os.getenv("TARGET_ID", "").strip()
+    target_id = os.getenv("TARGET_GROUP_ID", "").strip()
 
     if not access_token or not target_id:
-        logger.error("❌ Critical: Missing CHANNEL_ACCESS_TOKEN or TARGET_ID")
+        logger.error("❌ Critical: Missing CHANNEL_ACCESS_TOKEN or TARGET_GROUP_ID")
         return
 
     # 1. 計算時間範圍 (明天整天)

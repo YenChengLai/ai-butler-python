@@ -30,10 +30,10 @@ def main():
 
     # 1. 讀取環境變數 & 檢查
     access_token = os.getenv("CHANNEL_ACCESS_TOKEN")
-    target_id = os.getenv("TARGET_ID", "").strip()
+    target_id = os.getenv("TARGET_GROUP_ID", "").strip()
 
     if not access_token or not target_id:
-        logger.error("❌ Critical: Missing CHANNEL_ACCESS_TOKEN or TARGET_ID")
+        logger.error("❌ Critical: Missing CHANNEL_ACCESS_TOKEN or TARGET_GROUP_ID")
         return
 
     # 遮罩顯示 ID (確認讀取正確)

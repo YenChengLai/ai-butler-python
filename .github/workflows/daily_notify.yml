@@ -2,9 +2,7 @@ name: Daily Schedule Notification
 
 on:
   schedule:
-    # 每天 UTC 13:00 = 台灣時間 21:00
     - cron: '30 13 * * *'
-  # 允許手動測試
   workflow_dispatch:
 
 jobs:
@@ -34,8 +32,7 @@ jobs:
       env:
         CHANNEL_ACCESS_TOKEN: ${{ secrets.CHANNEL_ACCESS_TOKEN }}
         CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
-        # 使用我們剛剛確認過有效的 Group ID
-        TARGET_ID: ${{ secrets.TARGET_GROUP_ID }}
+        TARGET_GROUP_ID: ${{ secrets.TARGET_GROUP_ID }}
       run: |
         export PYTHONPATH=$PYTHONPATH:.
         python -u src/scripts/daily_report.py
