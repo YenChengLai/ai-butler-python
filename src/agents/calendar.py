@@ -9,6 +9,7 @@ from src.utils.flex_templates import (
     generate_overview_flex,
 )
 from src.skills.calendar_skill import CalendarSkills
+from src.config import GEMINI_MODEL_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 class CalendarAgent:
     def __init__(self):
         self.skills = CalendarSkills()
-        self.model = genai.GenerativeModel("gemini-3-flash-preview")
+        self.model = genai.GenerativeModel(GEMINI_MODEL_NAME)
 
         # ✅ 優化：在初始化時就讀入 Prompt，之後重複使用
         self.prompt_template = self._load_prompt()
