@@ -138,10 +138,10 @@ graph TD
 5. **設定 GitHub Actions (自動報表用)**
    若要啟用每日/每週報表，請至 GitHub Repo 的 Settings > Secrets and variables > Actions 新增以下 Secrets：
 
-- CHANNEL_ACCESS_TOKEN: LINE Channel Access Token
-- CALENDAR_ID: 目標 Google Calendar ID
-- TARGET_GROUP_ID: 接收報表的群組 ID (C...) 或使用者 ID (U...)
-- GCP_SA_KEY_BASE64: 將 service_account.json 轉為 Base64 字串後填入。
+- **CHANNEL_ACCESS_TOKEN**: LINE Channel Access Token
+- **CALENDAR_ID**: 目標 Google Calendar ID
+- **TARGET_GROUP_ID**: 接收報表的群組 ID (C...) 或使用者 ID (U...)
+- **GCP_SA_KEY_BASE64**: 將 service_account.json 轉為 Base64 字串後填入。
   - 產生指令: base64 -i service_account.json -o sa_base64.txt (複製 txt 內容)
 
 💡 **常見問題：如何取得正確的 Group ID？** LINE 官方帳號後台網址上的 ID 不是 API 用的 Group ID。

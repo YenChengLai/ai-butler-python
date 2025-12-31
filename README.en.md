@@ -142,10 +142,10 @@ To enable the Daily/Weekly reports, you need to configure GitHub Secrets:
 1. Go to your repository Settings > Secrets and variables > Actions.
 2. Add the following secrets:
 
-- CHANNEL_ACCESS_TOKEN: Your LINE Channel Access Token.
-- CALENDAR_ID: Your Google Calendar ID (e.g., primary).
-- TARGET_GROUP_ID: The LINE Group ID (starts with C) or User ID (U) where reports will be sent.
-- GCP_SA_KEY_BASE64: Your GCP Service Account JSON encoded in Base64.
+- **CHANNEL_ACCESS_TOKEN**: Your LINE Channel Access Token.
+- **CALENDAR_ID**: Your Google Calendar ID (e.g., primary).
+- **TARGET_GROUP_ID**: The LINE Group ID (starts with C) or User ID (U) where reports will be sent.
+- **GCP_SA_KEY_BASE64**: Your GCP Service Account JSON encoded in Base64.
   - Command to generate: base64 -i service_account.json -o sa_base64.txt (Copy the content of the txt file).
 
 💡 **Tip: How to get the Group ID?** The ID in the LINE OA Manager URL is NOT the API Group ID.
