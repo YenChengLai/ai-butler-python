@@ -79,7 +79,11 @@ def main():
 
     if not events:
         # 如果沒行程，傳送簡單文字
-        messages_to_send.append(TextMessage(text="📅 未來七天內沒有安排任何行程。"))
+        messages_to_send.append(
+            TextMessage(
+                text="📅 未來七天內沒有安排任何行程。", quickReply=None, quoteToken=None
+            )
+        )
     else:
         # 有行程，產生漂亮的 Flex Message
         try:
@@ -97,8 +101,9 @@ def main():
 
             messages_to_send.append(
                 FlexMessage(
-                    alt_text=f"未來七天有 {len(events)} 個行程",
+                    altText=f"未來七天有 {len(events)} 個行程",
                     contents=FlexContainer.from_dict(flex_json),
+                    quickReply=None,
                 )
             )
         except Exception as e:
@@ -112,15 +117,21 @@ def main():
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             line_bot_api.push_message(
-                PushMessageRequest(to=target_id, messages=messages_to_send)
+                PushMessageRequest(
+                    to=target_id,
+                    messages=messages_to_send,
+                    notificationDisabled=False,
+                    customAggregationUnits=None,
+                )
             )
         logger.info("✅ Report sent successfully!")
 
     except Exception as e:
         logger.error("❌ FAILURE! Could not send message.")
         logger.error("💥 Error Details: %s", e)
-        if hasattr(e, "body"):
-            logger.error("🔍 API Body: %s", e.body)
+        body = getattr(e, "body", None)
+        if body:
+            logger.error("🔍 API Body: %s", body)
 
 
 if __name__ == "__main__":
