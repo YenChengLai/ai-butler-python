@@ -1,12 +1,13 @@
 # 🤖 AI Butler - 個人智慧管家 (Python Ver.)
 
-這是一個基於 **Serverless 架構** 的 LINE AI 機器人，核心使用 Python 開發，並採用 **Google Gemini 3.0 Flash** 作為大腦。
+這是一個基於 **Serverless 架構** 的 LINE AI 機器人，核心使用 Python 開發，並支援多個 AI 模型 Provider（目前支援 **Google Gemini** 與 **Anthropic Claude**），可透過單一環境變數快速切換。
 
 本專案採用 **Router-Agent-Skill** 架構模式，將「意圖判斷」、「參數解析」與「執行邏輯」分離，實現極高的穩定性與擴充性。
 
 ## ✨ 核心特色
 
-- **極速意圖判斷 (Router)**：使用 Gemini 3.0 Flash Preview，路由判斷延遲低於 0.5 秒。
+- **極速意圖判斷 (Router)**：使用 Flash/Haiku 等輕量模型，路由判斷延遲低於 0.5 秒。
+- **🔌 可替換 AI Provider**：透過 `LLM_PROVIDER` 一鍵切換 Gemini / Claude，不需修改任何業務邏輯。
 - **原子化技能 (Atomic Skills)**：將商業邏輯封裝為純 Python 函式，確保執行結果 100% 準確（不依賴 AI 寫程式）。
 - **自然語言行事曆管理**：
   - **建立**: 「明天晚上七點跟小明吃飯」
@@ -26,7 +27,7 @@
 
 - **語言**：Python 3.11
 - **雲端平台**：Google Cloud Platform (Cloud Functions Gen 2, Cloud Run)
-- **AI 模型**：Google Gemini 3.0 Flash (Preview)
+- **AI Provider**：Google Gemini 3.0 Flash / Anthropic Claude（可切換）
 - **訊息平台**：LINE Messaging API (SDK v3)
 - **CI/CD**：GitHub Actions (排程與自動化)
 - **設計模式**：Router-Agent-Skill Pattern
@@ -39,9 +40,15 @@ graph TD
     Line --Webhook--> Gateway["⚡ Main Router (Gateway)"]
 
     subgraph "🧠 Intelligence Layer"
-        Gateway --"1. 分類 (Intent)"--> RouterModel["Gemini (Router Prompt)"]
+        Gateway --"1. 分類 (Intent)"--> RouterLLM["LLM Provider\n(Router Role)"]
         Gateway --"2. 派發"--> CalAgent["📅 Calendar Agent"]
-        CalAgent --"3. 解析參數"--> AgentModel["Gemini (Parser Prompt)"]
+        CalAgent --"3. 解析參數"--> AgentLLM["LLM Provider\n(Agent Role)"]
+    end
+
+    subgraph "🔌 LLM Provider Layer"
+        RouterLLM & AgentLLM --> Factory["factory.py\n(LLM_PROVIDER env)"]
+        Factory -->|gemini| Gemini["GeminiProvider"]
+        Factory -->|claude| Claude["ClaudeProvider"]
     end
 
     subgraph "🛠️ Skills Layer (Deterministic)"
@@ -71,15 +78,23 @@ graph TD
 │       └── weekly_notify.yml   # 每週週報 Cron Job
 ├── src/
 │   ├── agents/                 # Agents (AI Parsers & Controllers)
-│   │   └── calendar.py
+│   │   ├── calendar.py
+│   │   └── expense.py
 │   ├── skills/                 # Skills (Pure Python Logic)
-│   │   └── calendar.py
+│   │   ├── calendar_skill.py
+│   │   └── expense.py
 │   ├── scripts/                # Standalone Scripts (報表用腳本)
 │   │   ├── daily_report.py
 │   │   └── weekly_report.py
-│   ├── services/               # Drivers
-│   │   └── gcal_service.py     # Google API 底層串接
+│   ├── services/               # Drivers & Adapters
+│   │   ├── gcal_service.py     # Google Calendar API 底層串接
+│   │   └── llm/                # ✨ LLM 抽象層 (可擴充新模型)
+│   │       ├── base.py         # LLMProvider 抽象介面
+│   │       ├── gemini.py       # Gemini 適配器
+│   │       ├── claude.py       # Claude 適配器
+│   │       └── factory.py      # Provider 工廠函式
 │   ├── prompts/                # AI System Prompts
+│   ├── config.py               # 統一設定管理
 │   └── utils/                  # Helpers & UI (Flex Messages)
 └── requirements.txt
 ```
@@ -92,7 +107,7 @@ graph TD
 - Google Cloud Platform 帳號 (啟用 Cloud Functions, Cloud Build, Calendar API)
 - **Service Account**: 建立一個 GCP 服務帳號，下載 JSON 金鑰，並授予其對日曆的讀寫權限。
 - LINE Developers Channel (Messaging API)
-- Google AI Studio API Key (Gemini)
+- AI Provider API Key：**Gemini** (`GEMINI_API_KEY`) 或 **Claude** (`ANTHROPIC_API_KEY`)
 
 2. **安裝依賴**
 
@@ -106,11 +121,18 @@ graph TD
 
    請在根目錄建立 `.env` 檔案：
 
-   ```ini, TOML
+   ```ini
+   # LINE Bot
    CHANNEL_ACCESS_TOKEN=你的_LINE_Token
    CHANNEL_SECRET=你的_LINE_Secret
-   GEMINI_API_KEY=你的_Gemini_Key
+
+   # Google
    CALENDAR_ID=你的_Gmail@gmail.com
+
+   # AI Provider 設定 (二選一)
+   LLM_PROVIDER=gemini          # 或 claude
+   GEMINI_API_KEY=你的_Gemini_Key
+   # ANTHROPIC_API_KEY=你的_Claude_Key
    ```
 
 4. **本地開發與部署**
@@ -132,7 +154,7 @@ graph TD
    --entry-point=webhook \
    --trigger-http \
    --allow-unauthenticated \
-   --set-env-vars="CHANNEL_ACCESS_TOKEN=...,CHANNEL_SECRET=...,GEMINI_API_KEY=...,CALENDAR_ID=..."
+   --set-env-vars="CHANNEL_ACCESS_TOKEN=...,CHANNEL_SECRET=...,LLM_PROVIDER=gemini,GEMINI_API_KEY=...,CALENDAR_ID=..."
    ```
 
 5. **設定 GitHub Actions (自動報表用)**
@@ -142,12 +164,23 @@ graph TD
 - **CALENDAR_ID**: 目標 Google Calendar ID
 - **TARGET_GROUP_ID**: 接收報表的群組 ID (C...) 或使用者 ID (U...)
 - **GCP_SA_KEY_BASE64**: 將 service_account.json 轉為 Base64 字串後填入。
-  - 產生指令: base64 -i service_account.json -o sa_base64.txt (複製 txt 內容)
+  - 產生指令: `base64 -i service_account.json -o sa_base64.txt`（複製 txt 內容）
 
 💡 **常見問題：如何取得正確的 Group ID？** LINE 官方帳號後台網址上的 ID 不是 API 用的 Group ID。
 
     1. 將機器人邀入群組。
     2. 在群組說話，前往 GCP Logs 查看該事件的 source.groupId。
+
+## 🔌 切換 AI Provider
+
+本專案支援在 Gemini 與 Claude 之間切換，**無需修改任何程式碼**，只需更改 `.env`：
+
+| `LLM_PROVIDER` | 需要的 API Key | Router 模型 | Agent 模型 |
+|---|---|---|---|
+| `gemini`（預設）| `GEMINI_API_KEY` | `gemini-3-flash-preview` | `gemini-3-flash-preview` |
+| `claude` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` | `claude-sonnet-4-5` |
+
+> 模型名稱可在 `src/config.py` 中調整。
 
 ## 📝 使用範例
 

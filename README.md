@@ -1,13 +1,14 @@
-# 🤖 AI Butler (LINE Bot with Google Gemini & Calendar)
+# 🤖 AI Butler (LINE Bot with Multi-Provider AI & Calendar)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Google%20Cloud%20Functions-green.svg)
 ![LINE](https://img.shields.io/badge/Messaging-LINE%20API-00C300.svg)
-![AI](https://img.shields.io/badge/AI-Gemini%20Flash-8E75B2.svg)
+![Gemini](https://img.shields.io/badge/AI-Gemini%20Flash-8E75B2.svg)
+![Claude](https://img.shields.io/badge/AI-Claude-D97757.svg)
 
-**AI Butler** is a smart personal assistant built with **Python**, **LINE Messaging API**, and **Google Gemini**. It streamlines your Google Calendar management via natural language and keeps you updated with automated daily/weekly agenda reports.
+**AI Butler** is a smart personal assistant built with **Python** and **LINE Messaging API**. It supports multiple AI providers (**Google Gemini** and **Anthropic Claude**, switchable via a single env var), manages your Google Calendar via natural language, and delivers automated daily/weekly schedule reports through GitHub Actions.
 
-**AI Butler** 是一個基於 **Python**、**LINE Messaging API** 與 **Google Gemini** 打造的智慧個人管家。它能透過自然語言輕鬆管理 Google 日曆，並利用 GitHub Actions 自動發送每日與每週的行程預告。
+**AI Butler** 是一個基於 **Python** 與 **LINE Messaging API** 打造的智慧個人管家。支援多個 AI 模型供應商（**Gemini** 與 **Claude**，透過環境變數一鍵切換），可用自然語言管理 Google 日曆，並透過 GitHub Actions 自動發送每日與每週行程報告。
 
 ---
 
@@ -24,14 +25,16 @@ Please select your preferred language to view the full documentation, installati
 
 ## ✨ Key Features / 核心功能
 
-- **🧠 Smart Intent Routing**: Powered by **Google Gemini (Flash)** to intelligently route requests (Calendar, Chat, Expense, etc.).
-  - **智慧意圖分流**：使用 Gemini 模型精準判斷使用者意圖並分流處理。
+- **🔌 Multi-Provider AI**: Switch between Gemini and Claude via `LLM_PROVIDER=gemini|claude`. Zero code changes required.
+  - **多模型支援**：一行環境變數切換 Gemini / Claude，無需改動程式碼。
+- **🧠 Smart Intent Routing**: Lightweight models classify user intent in under 0.5s.
+  - **智慧意圖分流**：使用輕量模型精準判斷意圖，延遲低於 0.5 秒。
 - **📅 Natural Language Calendar**: "Book a meeting next Monday at 10 AM."
   - **自然語言行事曆**：像對秘書說話一樣新增或查詢行程。
 - **🔔 Automated Reports**: Daily and Weekly schedule summaries sent via **GitHub Actions**.
   - **自動化行程報表**：每日與每週定時推播行程總覽。
-- **👥 Group Chat Support**: Works perfectly in groups using the trigger word **"Butler" / "管家"**.
-  - **支援群組協作**：可在群組中喚醒機器人，協助團隊管理時間。
+- **👥 Group Chat Support**: Works in groups using the trigger word **"Butler" / "管家"**.
+  - **支援群組協作**：可在群組中喚醒機器人。
 - **☁️ Serverless**: Built on **Google Cloud Functions (Gen 2)**.
   - **無伺服器架構**：部署於 GCP，輕量且易於擴充。
 
@@ -41,13 +44,21 @@ Please select your preferred language to view the full documentation, installati
 
 ```text
 .
-├── README.md           # This file (Portal)
-├── README.en.md        # Detailed English Documentation
-├── README.zh-tw.md     # 完整中文說明文件
-├── main.py             # Gateway (Router)
-├── src/                # Source code (Agents, Skills, Utils)
-├── .github/workflows/  # CI/CD & Cron Jobs
-└── requirements.txt    # Dependencies
+├── README.md               # This file (Portal)
+├── README.en.md            # Detailed English Documentation
+├── README.zh-tw.md         # 完整中文說明文件
+├── main.py                 # Gateway (Router)
+├── src/
+│   ├── agents/             # AI Parsers & Controllers
+│   ├── skills/             # Deterministic Python Logic
+│   ├── services/
+│   │   ├── gcal_service.py # Google Calendar driver
+│   │   └── llm/            # ✨ LLM abstraction layer (base / gemini / claude / factory)
+│   ├── prompts/            # AI System Prompts
+│   ├── config.py           # Centralized config (models, providers)
+│   └── utils/              # Helpers & Flex Message templates
+├── .github/workflows/      # CI/CD & Cron Jobs
+└── requirements.txt        # Dependencies
 ```
 
 ## 📄 License

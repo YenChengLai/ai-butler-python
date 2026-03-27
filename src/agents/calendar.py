@@ -1,23 +1,24 @@
-import json
 import logging
 import datetime
 import pathlib
-import google.generativeai as genai
 from linebot.v3.messaging import TextMessage, FlexMessage, FlexContainer
 from src.utils.flex_templates import (
     generate_create_success_flex,
     generate_overview_flex,
 )
 from src.skills.calendar_skill import CalendarSkills
-from src.config import GEMINI_MODEL_NAME
+from src.services.llm.factory import create_llm_provider
 
 logger = logging.getLogger(__name__)
+
+# LINE 單次回覆上限為 5 則訊息
+MAX_LINE_MESSAGES = 5
 
 
 class CalendarAgent:
     def __init__(self):
         self.skills = CalendarSkills()
-        self.model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        self.llm = create_llm_provider(role="agent")
 
         # ✅ 優化：在初始化時就讀入 Prompt，之後重複使用
         self.prompt_template = self._load_prompt()
@@ -41,7 +42,7 @@ class CalendarAgent:
 
     def _normalize_args(self, args):
         """
-        [資料清洗] 強制將 Gemini 可能給錯的 key 轉回我們 Skill 支援的 key
+        [資料清洗] 強制將 LLM 可能給錯的 key 轉回我們 Skill 支援的 key
         """
         new_args = args.copy()
 
@@ -72,14 +73,10 @@ class CalendarAgent:
             "{{CURRENT_TIME}}", dt_now
         )
 
-        # 3. Call Gemini (Parsing)
+        # 3. Call LLM (Parsing)
         actions_list = []
         try:
-            response = self.model.generate_content(prompt)
-            clean_text = response.text.replace("```json", "").replace("```", "").strip()
-
-            # 解析 JSON List
-            parsed_data = json.loads(clean_text)
+            parsed_data = self.llm.parse_json_response(prompt)
 
             # 防呆：如果 AI 還是只回傳單一 Dict (偶爾會發生)，把它包成 List
             if isinstance(parsed_data, dict):
@@ -89,10 +86,10 @@ class CalendarAgent:
             else:
                 raise ValueError("AI returned neither Dict nor List")
 
-            logger.info("🤖 Gemini Parsed Actions List: %s", actions_list)
+            logger.info("🤖 LLM Parsed Actions List: %s", actions_list)
 
         except Exception as e:
-            logger.error("Gemini parsing failed: %s", e)
+            logger.error("LLM parsing failed: %s", e)
             return [TextMessage(text="😵‍💫 抱歉，我不確定您的指令，請再試一次。")]
 
         # 4. Dispatch Skills (Loop Processing)
@@ -154,7 +151,6 @@ class CalendarAgent:
                 elif skill == "list_events":
                     result = self.skills.list_events(**args)
                     if result["success"]:
-                        # 避免一次查詢產生太多 Flex Message，這裡通常只有一個查詢指令
                         flex_json = generate_overview_flex(result["events"])
                         reply_messages.append(
                             FlexMessage(
@@ -171,7 +167,6 @@ class CalendarAgent:
                     result = self.skills.delete_event_by_query(**args)
                     if result["success"]:
                         deleted_title = result["deleted_event"].get("summary", "行程")
-                        # 為了避免洗版，刪除通常用簡單文字回覆
                         reply_messages.append(
                             TextMessage(text=f"🗑️ 已刪除：{deleted_title}")
                         )
@@ -183,7 +178,6 @@ class CalendarAgent:
                 elif skill == "reschedule_event":
                     result = self.skills.reschedule_event(**args)
 
-                    # 組合文字訊息
                     status_msg = ""
                     if result["delete_status"]["success"]:
                         status_msg += "🗑️ 舊行程已刪除\n"
@@ -191,16 +185,12 @@ class CalendarAgent:
                         status_msg += "⚠️ 找不到舊行程 (直接建立新行程)\n"
 
                     if result["create_status"]["success"]:
-                        # 如果成功，使用 Flex Message 展示新行程
                         ui_data = {
                             "title": args.get("new_title"),
                             "startTime": args.get("new_start_time"),
                             "endTime": args.get("new_end_time"),
                         }
                         flex_json = generate_create_success_flex(ui_data)
-
-                        # 先把舊行程刪除的狀態用文字送出 (可選，或合併)
-                        # 這裡選擇直接送出 Flex，標題寫「行程已改期」
                         reply_messages.append(
                             FlexMessage(
                                 alt_text="行程已改期",
@@ -221,11 +211,14 @@ class CalendarAgent:
                 logger.error("Skill execution failed (%s): %s", skill, e)
                 reply_messages.append(TextMessage(text=f"❌ 執行 {skill} 時發生錯誤"))
 
-        # 限制回傳訊息數量
-        # LINE 一次最多只能回傳 5 則訊息。如果超過，我們只取前 5 則，並加註提示。
-        if len(reply_messages) > 5:
-            reply_messages = reply_messages[:4]
-            reply_messages.append(TextMessage(text="⚠️ 指令過多，僅顯示前 4 筆結果。"))
+        # 限制回傳訊息數量 (LINE 上限為 MAX_LINE_MESSAGES 則)
+        if len(reply_messages) > MAX_LINE_MESSAGES:
+            reply_messages = reply_messages[: MAX_LINE_MESSAGES - 1]
+            reply_messages.append(
+                TextMessage(
+                    text=f"⚠️ 指令過多，僅顯示前 {MAX_LINE_MESSAGES - 1} 筆結果。"
+                )
+            )
 
         # 如果沒有任何結果 (例如解析出來是空陣列)
         if not reply_messages:

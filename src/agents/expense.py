@@ -1,14 +1,11 @@
-import os
-import json
 import logging
 import datetime
 import pathlib
-import google.generativeai as genai
 from linebot.v3.messaging import TextMessage
 
 # 引入 Skill
 from src.skills.expense import ExpenseSkills
-from src.config import GEMINI_MODEL_NAME
+from src.services.llm.factory import create_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +13,19 @@ logger = logging.getLogger(__name__)
 class ExpenseAgent:
     def __init__(self):
         self.skills = ExpenseSkills()
-        self.model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        self.llm = create_llm_provider(role="agent")
 
     def _load_prompt(self, user_text):
         """讀取 Prompt 並填入變數"""
         current_dir = pathlib.Path(__file__).parent.parent
         prompt_path = current_dir / "prompts" / "expense_agent.txt"
 
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            template = f.read()
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                template = f.read()
+        except Exception as e:
+            logger.error("❌ Error reading expense prompt: %s", e)
+            return ""
 
         today = datetime.date.today().isoformat()
         prompt = template.replace("{{CURRENT_DATE}}", today)
@@ -36,18 +37,17 @@ class ExpenseAgent:
         """
         logger.info("💰 Expense Agent received: %s", user_text)
 
-        # 1. 呼叫 Gemini 解析意圖
+        # 1. 呼叫 LLM 解析意圖
         try:
             prompt = self._load_prompt(user_text)
-            response = self.model.generate_content(prompt)
-            cleaned_text = (
-                response.text.replace("```json", "").replace("```", "").strip()
-            )
-            ai_response = json.loads(cleaned_text)
+            if not prompt:
+                return [TextMessage(text="❌ 系統錯誤：Prompt 載入失敗，請檢查 Log")]
+
+            ai_response = self.llm.parse_json_response(prompt)
             logger.info("🤖 AI Parsed Data: %s", ai_response)
 
         except Exception as e:
-            logger.error("❌ Gemini Parsing Error: %s", str(e))
+            logger.error("❌ LLM Parsing Error: %s", str(e))
             return [TextMessage(text="😵‍💫 抱歉，我看不懂這個指令，請再試一次。")]
 
         # 2. 根據 Action 分流處理
@@ -114,11 +114,8 @@ class ExpenseAgent:
         title_prefix = "總支出"
 
         if col and val:
-            # 【優化點 1】支援多重關鍵字 (例如 "餐費, 飲料")
-            # 將 AI 回傳的字串用逗號切開，變成清單 ["餐費", "飲料"]
+            # 支援多重關鍵字 (例如 "餐費, 飲料")
             target_values = [v.strip() for v in val.split(",")]
-
-            # 篩選：只要欄位內容 "包含" 在目標清單中就算符合
             target_expenses = [
                 x for x in expenses if str(x.get(col, "")).strip() in target_values
             ]
@@ -138,9 +135,8 @@ class ExpenseAgent:
 
         for row in target_expenses:
             try:
-                # 【優化點 2】強力清洗金額格式 (處理 NT$, $, 逗號, 空格)
+                # 強力清洗金額格式 (處理 NT$, $, 逗號, 空格)
                 amt_raw = str(row.get("Amount", 0))
-                # 移除所有非數字與負號的字元 (簡單暴力法)
                 clean_amt_str = "".join(
                     filter(lambda x: x.isdigit() or x == "-", amt_raw)
                 )

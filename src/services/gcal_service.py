@@ -43,7 +43,7 @@ class GCalService:
                 "link": created_event.get("htmlLink"),
             }
         except HttpError as error:
-            logger.error(f"An error occurred: {error}")
+            logger.error("An error occurred: %s", error)
             return {"success": False, "message": str(error)}
 
     def list_events(self, time_min, time_max=None):
@@ -85,7 +85,7 @@ class GCalService:
             events = events_result.get("items", [])
             return {"success": True, "events": events}
         except Exception as e:
-            logger.error(f"GCal List Error: {e}")
+            logger.error("GCal List Error: %s", e)
             return {"success": False, "message": str(e)}
 
     def delete_event(self, event_id):
@@ -96,5 +96,5 @@ class GCalService:
             ).execute()
             return {"success": True}
         except HttpError as error:
-            logger.error(f"GCal Delete Error: {error}")
+            logger.error("GCal Delete Error: %s", error)
             return {"success": False, "message": str(error)}

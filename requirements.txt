@@ -7,6 +7,9 @@ line-bot-sdk>=3.0.0
 # Google AI (Gemini)
 google-generativeai>=0.8.3
 
+# Anthropic Claude (optional: set LLM_PROVIDER=claude in .env to use)
+anthropic>=0.40.0
+
 # Google APIs (Calendar, Sheets)
 google-api-python-client
 google-auth

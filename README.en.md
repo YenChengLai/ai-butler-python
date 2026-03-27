@@ -1,12 +1,13 @@
 # 🤖 AI Butler - Personal Smart Assistant (Python Ver.)
 
-A Serverless LINE AI Bot built with Python, powered by **Google Gemini 3.0 Flash**.
+A **Serverless** LINE AI Bot built with Python, supporting multiple AI model providers (**Google Gemini** and **Anthropic Claude**) that can be switched with a single environment variable.
 
-This project adopts the **Router-Agent-Skill** architecture pattern, separating "Intent Classification", "Parameter Parsing", and "Execution Logic" to achieve high stability and scalability. It also features automated scheduled reporting via GitHub Actions.
+This project adopts the **Router-Agent-Skill** architecture pattern, separating "Intent Classification", "Parameter Parsing", and "Execution Logic" to achieve high stability and scalability.
 
 ## ✨ Core Features
 
-- **Ultra-Fast Intent Routing**: Powered by Gemini 3.0 Flash Preview, creating a sub-0.5s latency router.
+- **Ultra-Fast Intent Routing**: Uses lightweight models (Flash/Haiku) for sub-0.5s latency routing.
+- **🔌 Swappable AI Provider**: Switch between Gemini and Claude via `LLM_PROVIDER` with zero code changes.
 - **Atomic Skills**: Business logic is encapsulated in pure Python functions, ensuring 100% execution accuracy (no dependency on AI-generated code).
 - **Natural Language Calendar Management**:
   - **Create**: "Dinner with Sam tomorrow at 7 PM."
@@ -26,7 +27,7 @@ This project adopts the **Router-Agent-Skill** architecture pattern, separating 
 
 - **Language**: Python 3.11
 - **Cloud**: Google Cloud Platform (Cloud Functions Gen 2, Cloud Run)
-- **AI Model**: Google Gemini 3.0 Flash (Preview)
+- **AI Providers**: Google Gemini 3.0 Flash / Anthropic Claude (switchable)
 - **Messaging**: LINE Messaging API (SDK v3)
 - **CI/CD**: GitHub Actions (for Scheduled Cron Jobs)
 - **Pattern**: Router-Agent-Skill Architecture
@@ -39,9 +40,15 @@ graph TD
     Line --Webhook--> Gateway["⚡ Main Router (Gateway)"]
 
     subgraph "🧠 Intelligence Layer"
-        Gateway --"1. Classify Intent"--> RouterModel["Gemini (Router Prompt)"]
+        Gateway --"1. Classify Intent"--> RouterLLM["LLM Provider\n(Router Role)"]
         Gateway --"2. Dispatch"--> CalAgent["📅 Calendar Agent"]
-        CalAgent --"3. Parse Args"--> AgentModel["Gemini (Parser Prompt)"]
+        CalAgent --"3. Parse Args"--> AgentLLM["LLM Provider\n(Agent Role)"]
+    end
+
+    subgraph "🔌 LLM Provider Layer"
+        RouterLLM & AgentLLM --> Factory["factory.py\n(LLM_PROVIDER env)"]
+        Factory -->|gemini| Gemini["GeminiProvider"]
+        Factory -->|claude| Claude["ClaudeProvider"]
     end
 
     subgraph "🛠️ Skills Layer (Deterministic)"
@@ -71,15 +78,23 @@ graph TD
 │       └── weekly_notify.yml   # Weekly Schedule Cron
 ├── src/
 │   ├── agents/                 # Agents (AI Parsers & Controllers)
-│   │   └── calendar.py
+│   │   ├── calendar.py
+│   │   └── expense.py
 │   ├── skills/                 # Skills (Pure Python Logic)
-│   │   └── calendar.py
+│   │   ├── calendar_skill.py
+│   │   └── expense.py
 │   ├── scripts/                # Standalone Scripts for Reports
 │   │   ├── daily_report.py
 │   │   └── weekly_report.py
-│   ├── services/               # Drivers
-│   │   └── gcal_service.py     # Bottom-level API integration
+│   ├── services/               # Drivers & Adapters
+│   │   ├── gcal_service.py     # Google Calendar API integration
+│   │   └── llm/                # ✨ LLM Abstraction Layer (extensible)
+│   │       ├── base.py         # LLMProvider abstract interface
+│   │       ├── gemini.py       # Gemini adapter
+│   │       ├── claude.py       # Claude adapter
+│   │       └── factory.py      # Provider factory function
 │   ├── prompts/                # AI System Prompts
+│   ├── config.py               # Centralized configuration
 │   └── utils/                  # Helpers & UI (Flex Messages)
 └── requirements.txt
 ```
@@ -90,9 +105,9 @@ graph TD
 
 - Python 3.11+
 - Google Cloud Platform account (enable Cloud Functions, Cloud Build, Calendar API)
-- Service Account: Create a Service Account in GCP, download the JSON key, and grant it access to your Calendar.
+- **Service Account**: Create a Service Account in GCP, download the JSON key, and grant it access to your Calendar.
 - LINE Developers Channel (Messaging API)
-- Google AI Studio API Key (Gemini)
+- AI Provider API Key: **Gemini** (`GEMINI_API_KEY`) or **Claude** (`ANTHROPIC_API_KEY`)
 
 2. **Installation**
 
@@ -104,13 +119,20 @@ graph TD
 
 3. **Environment Variables**
 
-   Please create a `.env` file in the root directory:
+   Create a `.env` file in the root directory:
 
    ```ini
+   # LINE Bot
    CHANNEL_ACCESS_TOKEN=your_line_token
    CHANNEL_SECRET=your_line_secret
-   GEMINI_API_KEY=your_gemini_key
+
+   # Google
    CALENDAR_ID=your_gmail@gmail.com
+
+   # AI Provider (choose one)
+   LLM_PROVIDER=gemini          # or: claude
+   GEMINI_API_KEY=your_gemini_key
+   # ANTHROPIC_API_KEY=your_claude_key
    ```
 
 4. **Local Development & Deployment**
@@ -132,26 +154,34 @@ graph TD
    --entry-point=webhook \
    --trigger-http \
    --allow-unauthenticated \
-   --set-env-vars="CHANNEL_ACCESS_TOKEN=...,CHANNEL_SECRET=...,GEMINI_API_KEY=...,CALENDAR_ID=..."
+   --set-env-vars="CHANNEL_ACCESS_TOKEN=...,CHANNEL_SECRET=...,LLM_PROVIDER=gemini,GEMINI_API_KEY=...,CALENDAR_ID=..."
    ```
 
 5. **Setting up Scheduled Reports (GitHub Actions)**
 
-To enable the Daily/Weekly reports, you need to configure GitHub Secrets:
-
-1. Go to your repository Settings > Secrets and variables > Actions.
-2. Add the following secrets:
+To enable the Daily/Weekly reports, configure the following GitHub Secrets (Settings > Secrets and variables > Actions):
 
 - **CHANNEL_ACCESS_TOKEN**: Your LINE Channel Access Token.
-- **CALENDAR_ID**: Your Google Calendar ID (e.g., primary).
-- **TARGET_GROUP_ID**: The LINE Group ID (starts with C) or User ID (U) where reports will be sent.
+- **CALENDAR_ID**: Your Google Calendar ID.
+- **TARGET_GROUP_ID**: The LINE Group ID (starts with `C`) or User ID (starts with `U`) where reports will be sent.
 - **GCP_SA_KEY_BASE64**: Your GCP Service Account JSON encoded in Base64.
-  - Command to generate: base64 -i service_account.json -o sa_base64.txt (Copy the content of the txt file).
+  - Command to generate: `base64 -i service_account.json -o sa_base64.txt` (copy the file content).
 
-💡 **Tip: How to get the Group ID?** The ID in the LINE OA Manager URL is NOT the API Group ID.
+💡 **Tip: How to get the correct Group ID?** The ID shown in the LINE OA Manager URL is **not** the API Group ID.
 
     1. Invite the bot to a group.
-    2. Check your GCP Logs for the source.groupId when you send a message.
+    2. Send a message in the group, then check GCP Logs for `source.groupId`.
+
+## 🔌 Switching AI Providers
+
+This project supports switching between Gemini and Claude **with zero code changes** — just update your `.env`:
+
+| `LLM_PROVIDER` | Required API Key | Router Model | Agent Model |
+|---|---|---|---|
+| `gemini` (default) | `GEMINI_API_KEY` | `gemini-3-flash-preview` | `gemini-3-flash-preview` |
+| `claude` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` | `claude-sonnet-4-5` |
+
+> Model names can be customized in `src/config.py`.
 
 ## 📝 Usage Examples
 

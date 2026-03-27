@@ -4,7 +4,6 @@ import logging
 import functions_framework
 import pathlib
 from dotenv import load_dotenv
-import google.generativeai as genai
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -20,6 +19,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 # 引入你的 Agent
 from src.agents.calendar import CalendarAgent
 from src.agents.expense import ExpenseAgent
+from src.services.llm.factory import create_llm_provider
 
 # 1. Setup & Config
 load_dotenv()
@@ -31,17 +31,15 @@ logger = logging.getLogger("MainRouter")
 
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
-    logger.critical("❌ Critical Error: Missing Environment Variables!")
+    logger.critical("❌ Critical Error: Missing LINE environment variables (CHANNEL_ACCESS_TOKEN / CHANNEL_SECRET)!")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# 設定 Gemini (Router 用 Flash 即可，求快)
-genai.configure(api_key=GEMINI_API_KEY)
-router_model = genai.GenerativeModel("gemini-3-flash-preview")
+# 設定 Router LLM (求快，用於意圖分類)
+router_llm = create_llm_provider(role="router")
 
 # 初始化 Agents
 calendar_agent = CalendarAgent()
@@ -70,9 +68,7 @@ def get_router_intent(user_text):
     )
 
     try:
-        response = router_model.generate_content(prompt)
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(clean_text)
+        data = router_llm.parse_json_response(prompt)
         intent = data.get("intent", "CHAT")
         return intent
     except Exception as e:
@@ -86,7 +82,6 @@ def webhook(request):
     signature = request.headers.get("X-Line-Signature")
     try:
         body = request.get_data(as_text=True)
-        # 直接交給 handler 處理，不需要再手動 parse 來攔截 ID 了
         handler.handle(body, signature)
     except InvalidSignatureError:
         return "Invalid signature", 400
@@ -122,12 +117,9 @@ def handle_message(event):
     # [Step 2] 派發給專屬 Agent (解析 + 執行)
     try:
         if intent == "CALENDAR":
-            # 直接把 user_msg 丟給 CalendarAgent
-            # 它會回傳一個 list of Message Objects (Text or Flex)
             reply_messages = calendar_agent.handle_message(user_msg)
 
         elif intent == "EXPENSE":
-            # 傳入 user_id 是為了未來擴充 (例如多人記帳時分辨是誰付的)
             reply_messages = expense_agent.handle_message(
                 user_msg, user_id=event.source.user_id
             )

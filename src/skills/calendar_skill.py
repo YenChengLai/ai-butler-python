@@ -37,7 +37,7 @@ class CalendarSkills:
         2. 若有 keyword，篩選標題
         3. 刪除最吻合的那一筆
         """
-        logger.info(f"🗑️ Skill: Delete search | Time: {time_min} | Key: {keyword}")
+        logger.info("🗑️ Skill: Delete search | Time: %s | Key: %s", time_min, keyword)
 
         # 1. 搜尋行程 (範圍設為該時間點的當天)
         # 簡單起見，我們查該時間點往後 24 小時內的
@@ -81,7 +81,7 @@ class CalendarSkills:
         邏輯：先刪除舊的 -> 再建立新的
         """
         logger.info(
-            f"🔄 Skill: Reschedule | Old: {old_time_min} | New: {new_start_time}"
+            "🔄 Skill: Reschedule | Old: %s | New: %s", old_time_min, new_start_time
         )
 
         # 1. 嘗試刪除舊行程
