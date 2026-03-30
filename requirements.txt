@@ -21,3 +21,7 @@ gspread
 python-dotenv
 pytz
 requests
+aiohttp
+
+# 資料庫 (Firestore vector search)
+google-cloud-firestore>=2.16.0

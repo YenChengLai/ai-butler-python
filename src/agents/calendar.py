@@ -62,7 +62,7 @@ class CalendarAgent:
 
         return new_args
 
-    def handle_message(self, user_msg):
+    async def handle_message(self, user_msg):
         # 1. 檢查 Prompt 是否載入成功
         if not self.prompt_template:
             return [TextMessage(text="❌ 系統錯誤：Prompt 載入失敗，請檢查 Log")]
@@ -76,7 +76,7 @@ class CalendarAgent:
         # 3. Call LLM (Parsing)
         actions_list = []
         try:
-            parsed_data = self.llm.parse_json_response(prompt)
+            parsed_data = await self.llm.aparse_json_response(prompt)
 
             # 防呆：如果 AI 還是只回傳單一 Dict (偶爾會發生)，把它包成 List
             if isinstance(parsed_data, dict):

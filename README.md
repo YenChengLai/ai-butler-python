@@ -25,8 +25,12 @@ Please select your preferred language to view the full documentation, installati
 
 ## ✨ Key Features / 核心功能
 
+- **🧠 Learning Memory System**: Vector-search powered memories. Automatically logs technical or personal facts and retrieves context during chat (RAG).
+  - **學習記憶系統**：透過向量檢索 (Vector Search) 儲存並回憶過往對話重點，並在聊天時動態注入上下文 (RAG)。
 - **🔌 Multi-Provider AI**: Switch between Gemini and Claude via `LLM_PROVIDER=gemini|claude`. Zero code changes required.
   - **多模型支援**：一行環境變數切換 Gemini / Claude，無需改動程式碼。
+- **⚡ Async Architecture**: High concurrency handling with asynchronous event loops, minimizing Cold Start latencies in Serverless environments.
+  - **全非同步架構**：大幅降低 GCP Cold Start 造成的延遲，並發處理意圖分類與向量運算。
 - **🧠 Smart Intent Routing**: Lightweight models classify user intent in under 0.5s.
   - **智慧意圖分流**：使用輕量模型精準判斷意圖，延遲低於 0.5 秒。
 - **📅 Natural Language Calendar**: "Book a meeting next Monday at 10 AM."

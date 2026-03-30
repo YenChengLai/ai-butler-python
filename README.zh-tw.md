@@ -7,6 +7,8 @@
 ## ✨ 核心特色
 
 - **極速意圖判斷 (Router)**：使用 Flash/Haiku 等輕量模型，路由判斷延遲低於 0.5 秒。
+- **🧠 學習記憶系統 (Memory RAG)**：內建 Firestore Vector Search 組件，可自動濃縮並記憶技術文件、個人偏好，並透過時間半衰期 (Time-decay) 篩選背景知識注入聊天上下文。
+- **⚡ 非同步高併發架構**：核心採用全面 Async/Await，並在 Module-level 啟動實例化，解決 Serverless Cold Start 痛點。
 - **🔌 可替換 AI Provider**：透過 `LLM_PROVIDER` 一鍵切換 Gemini / Claude，不需修改任何業務邏輯。
 - **原子化技能 (Atomic Skills)**：將商業邏輯封裝為純 Python 函式，確保執行結果 100% 準確（不依賴 AI 寫程式）。
 - **自然語言行事曆管理**：

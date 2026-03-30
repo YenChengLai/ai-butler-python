@@ -7,6 +7,8 @@ This project adopts the **Router-Agent-Skill** architecture pattern, separating 
 ## ✨ Core Features
 
 - **Ultra-Fast Intent Routing**: Uses lightweight models (Flash/Haiku) for sub-0.5s latency routing.
+- **🧠 Learning Memory System (RAG)**: Built-in Firestore Vector Search. Auto-summarizes technical logs or personal facts, storing them via embeddings and injecting dynamic semantic context with time-decay weighting algorithms.
+- **⚡ Native Async Architecture**: Leverages asynchronous pipelines and module-level instantiations to dramatically eliminate Cold Start delays in Serverless environments.
 - **🔌 Swappable AI Provider**: Switch between Gemini and Claude via `LLM_PROVIDER` with zero code changes.
 - **Atomic Skills**: Business logic is encapsulated in pure Python functions, ensuring 100% execution accuracy (no dependency on AI-generated code).
 - **Natural Language Calendar Management**:

@@ -25,7 +25,7 @@ class GeminiProvider(LLMProvider):
         )
         logger.info("✅ GeminiProvider initialized with model: %s", model_name)
 
-    def generate(self, prompt: str) -> str:
-        """呼叫 Gemini API，回傳純文字回應。"""
-        response = self.model.generate_content(prompt)
+    async def agenerate(self, prompt: str) -> str:
+        """非同步呼叫 Gemini API，回傳純文字回應。"""
+        response = await self.model.generate_content_async(prompt)
         return response.text

@@ -1,25 +1,30 @@
 import os
 import json
 import logging
+import asyncio
 import functions_framework
 import pathlib
 from dotenv import load_dotenv
 
-from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration,
-    ApiClient,
-    MessagingApi,
+    AsyncApiClient,
+    AsyncMessagingApi,
     ReplyMessageRequest,
     TextMessage,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.webhook import AsyncWebhookHandler
 
-# 引入你的 Agent
+# 引入你的 Agent 與 Services
 from src.agents.calendar import CalendarAgent
 from src.agents.expense import ExpenseAgent
+from src.agents.chat import ChatAgent
+from src.agents.memory_parser import MemoryParser
 from src.services.llm.factory import create_llm_provider
+from src.services.llm.embedding import EmbeddingService
+from src.services.firestore_service import AsyncFirestoreService
 
 # 1. Setup & Config
 load_dotenv()
@@ -36,21 +41,26 @@ if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
     logger.critical("❌ Critical Error: Missing LINE environment variables (CHANNEL_ACCESS_TOKEN / CHANNEL_SECRET)!")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(CHANNEL_SECRET)
 
-# 設定 Router LLM (求快，用於意圖分類)
+# ✅ 冷啟動優化：在 Module Level 進行實例化，避免每次 Http Request 都重新分配資源
+handler = AsyncWebhookHandler(CHANNEL_SECRET)
+async_api_client = AsyncApiClient(configuration)
+line_bot_api = AsyncMessagingApi(async_api_client)
+
 router_llm = create_llm_provider(role="router")
-
-# 初始化 Agents
 calendar_agent = CalendarAgent()
 expense_agent = ExpenseAgent()
+chat_agent = ChatAgent()
+memory_parser = MemoryParser()
 
+# Singleton 實例
+embedding_service = EmbeddingService()
+firestore_service = AsyncFirestoreService()
 
-def get_router_intent(user_text):
+async def get_router_intent(user_text) -> tuple[str, bool]:
     """
-    [Router] 唯一的職責：分類
-    讀取 system_prompt.txt (分類專用 Prompt)
-    回傳: "CALENDAR", "EXPENSE", or "CHAT"
+    [Router] 非同步意圖分類
+    回傳: intent (str), needs_memory (bool)
     """
     current_dir = pathlib.Path(__file__).parent
     prompt_path = current_dir / "src" / "prompts" / "system_prompt.txt"
@@ -60,29 +70,30 @@ def get_router_intent(user_text):
             template = f.read()
     except Exception as e:
         logger.error("❌ Error reading system prompt: %s", e)
-        return "CHAT"  # 讀不到 Prompt 就當聊天
+        return "CHAT", False  # 讀不到 Prompt 就當一般聊天
 
-    # Router 不需要時間參數，只需要分類
     prompt = template.replace("{{USER_INPUT}}", user_text).replace(
         "{{CURRENT_TIME}}", ""
     )
 
     try:
-        data = router_llm.parse_json_response(prompt)
+        data = await router_llm.aparse_json_response(prompt)
         intent = data.get("intent", "CHAT")
-        return intent
+        needs_memory = data.get("needs_memory", False)
+        return intent, needs_memory
     except Exception as e:
         logger.error("❌ Router Decision Error: %s", e)
-        return "CHAT"
+        return "CHAT", False
 
 
-# 2. Cloud Function Entry
+# 2. Cloud Function Entry (Async)
 @functions_framework.http
-def webhook(request):
+async def webhook(request):
     signature = request.headers.get("X-Line-Signature")
     try:
+        # Request.get_data is Sync, but runs very fast
         body = request.get_data(as_text=True)
-        handler.handle(body, signature)
+        await handler.handle(body, signature)
     except InvalidSignatureError:
         return "Invalid signature", 400
     except Exception as e:
@@ -91,11 +102,12 @@ def webhook(request):
     return "OK"
 
 
-# 3. Message Handler
+# 3. Message Handler (Async)
 @handler.add(MessageEvent, message=TextMessageContent)
-def handle_message(event):
+async def handle_message(event):
     user_msg = event.message.text.strip()
     source_type = event.source.type
+    user_id = event.source.user_id
 
     # 群組喚醒檢查 (在群組內必須加 "管家")
     is_group = source_type in ["group", "room"]
@@ -108,33 +120,67 @@ def handle_message(event):
 
     logger.info("📨 Processing: %s", user_msg)
 
-    # [Step 1] Router 分流 (分類)
-    intent = get_router_intent(user_msg)
-    logger.info("🚦 Router Intent: %s", intent)
+    # ==========================
+    # 並發處理 Intent 與 Embedding
+    # ==========================
+    embedding_task = asyncio.create_task(embedding_service.get_embedding(user_msg))
+    intent_task = asyncio.create_task(get_router_intent(user_msg))
+
+    # A & B 平行執行
+    embedding, (intent, needs_memory) = await asyncio.gather(embedding_task, intent_task)
+    
+    logger.info("🚦 Router Intent: %s, Needs Memory: %s", intent, needs_memory)
 
     reply_messages = []
 
-    # [Step 2] 派發給專屬 Agent (解析 + 執行)
     try:
+        # ==========================
+        # Action 分發
+        # ==========================
         if intent == "CALENDAR":
-            reply_messages = calendar_agent.handle_message(user_msg)
+            reply_messages = await calendar_agent.handle_message(user_msg)
 
         elif intent == "EXPENSE":
-            reply_messages = expense_agent.handle_message(
-                user_msg, user_id=event.source.user_id
+            reply_messages = await expense_agent.handle_message(
+                user_msg, user_id=user_id
             )
+            
         else:
-            # CHAT 或 未知，選擇忽略以免打擾
-            pass
+            # CHAT 或 未知，先去 DB 撈回憶
+            memories = await firestore_service.search_memories(
+                query_embedding=embedding,
+                user_id=user_id,
+                limit=3
+            )
+            # 整合並發送給 Chat Agent
+            reply_messages = await chat_agent.handle_message(user_msg, memories)
 
-        # [Step 3] 回覆 LINE
-        if reply_messages:
-            with ApiClient(configuration) as api_client:
-                line_bot_api = MessagingApi(api_client)
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token, messages=reply_messages
-                    )
+        # 若是一般對話或功能，但需要紀錄 Memory
+        if needs_memory:
+            # 啟動背景 Task 提取記憶與存入 DB，不阻礙 Main Thread 的回應
+            async def memory_workflow():
+                parsed_mem = await memory_parser.parse_memory(user_msg)
+                await firestore_service.save_memory(
+                    user_id=user_id,
+                    content=user_msg,
+                    summary=parsed_mem['summary'],
+                    tags=parsed_mem['tags'],
+                    memory_type=parsed_mem['memory_type'],
+                    embedding=embedding
                 )
+            
+            asyncio.create_task(memory_workflow())
+
+        # ==========================
+        # 回覆 LINE
+        # ==========================
+        if reply_messages:
+            # 由於我們在 Module Level 初始化 AsyncMessagingApi，直接調用即可
+            await line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token, messages=reply_messages
+                )
+            )
+            
     except Exception as e:
         logger.error("❌ Dispatch Error: %s", e)

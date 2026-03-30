@@ -31,7 +31,7 @@ class ExpenseAgent:
         prompt = template.replace("{{CURRENT_DATE}}", today)
         return f"{prompt}\n\nUser Input: {user_text}"
 
-    def handle_message(self, user_text, user_id=None):
+    async def handle_message(self, user_text, user_id=None):
         """
         處理記帳與查帳請求的主流程
         """
@@ -43,7 +43,7 @@ class ExpenseAgent:
             if not prompt:
                 return [TextMessage(text="❌ 系統錯誤：Prompt 載入失敗，請檢查 Log")]
 
-            ai_response = self.llm.parse_json_response(prompt)
+            ai_response = await self.llm.aparse_json_response(prompt)
             logger.info("🤖 AI Parsed Data: %s", ai_response)
 
         except Exception as e:

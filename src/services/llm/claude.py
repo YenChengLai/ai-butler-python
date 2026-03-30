@@ -24,17 +24,17 @@ class ClaudeProvider(LLMProvider):
         if not api_key:
             raise ValueError("❌ ANTHROPIC_API_KEY is not set in environment variables.")
 
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model_name = model_name
         self.max_tokens = max_tokens
         logger.info("✅ ClaudeProvider initialized with model: %s", model_name)
 
-    def generate(self, prompt: str) -> str:
+    async def agenerate(self, prompt: str) -> str:
         """
-        呼叫 Claude Messages API，回傳純文字回應。
+        呼叫 Claude Messages API，非同步回傳純文字回應。
         將完整的 prompt 作為單一 user message 傳入。
         """
-        message = self.client.messages.create(
+        message = await self.client.messages.create(
             model=self.model_name,
             max_tokens=self.max_tokens,
             messages=[
