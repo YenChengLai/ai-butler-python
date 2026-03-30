@@ -96,16 +96,23 @@ async def get_router_intent(user_text) -> tuple[str, bool]:
 
 
 # ========================================================
-# 2. Event Loop 背景執行緒 (修復 WSGI / Async 衝突)
+# 2. Event Loop 背景執行緒 (修復 WSGI / Async 衝突與 Gunicorn Fork)
 # ========================================================
-_shared_loop = asyncio.new_event_loop()
+_shared_loop = None
+_loop_thread = None
 
 def _start_background_loop(loop):
     asyncio.set_event_loop(loop)
     loop.run_forever()
 
-_loop_thread = threading.Thread(target=_start_background_loop, args=(_shared_loop,), daemon=True)
-_loop_thread.start()
+def get_shared_loop():
+    global _shared_loop, _loop_thread
+    if _shared_loop is None:
+        # 在 Worker 內真正收到第一個 request 時才建立 Thread，避免被 Gunicorn pre-fork 殺掉
+        _shared_loop = asyncio.new_event_loop()
+        _loop_thread = threading.Thread(target=_start_background_loop, args=(_shared_loop,), daemon=True)
+        _loop_thread.start()
+    return _shared_loop
 
 # 3. Cloud Function Entry (Sync Wrapper)
 @functions_framework.http
@@ -113,9 +120,11 @@ def webhook(request):
     signature = request.headers.get("X-Line-Signature")
     try:
         body = request.get_data(as_text=True)
-        # 委派給共用的 Event Loop 執行，確保所有 Lazy Singleton 都在同一個 Loop 中存活
+        
+        # 委派給共用的 Event Loop 執行
+        loop = get_shared_loop()
         future = asyncio.run_coroutine_threadsafe(
-            process_webhook_async(body, signature), _shared_loop
+            process_webhook_async(body, signature), loop
         )
         return future.result()
     except InvalidSignatureError:
