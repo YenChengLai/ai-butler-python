@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import asyncio
+import threading
 import functions_framework
 import pathlib
 from dotenv import load_dotenv
@@ -94,31 +95,48 @@ async def get_router_intent(user_text) -> tuple[str, bool]:
         return "CHAT", False
 
 
-# 2. Cloud Function Entry (Async)
+# ========================================================
+# 2. Event Loop 背景執行緒 (修復 WSGI / Async 衝突)
+# ========================================================
+_shared_loop = asyncio.new_event_loop()
+
+def _start_background_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+_loop_thread = threading.Thread(target=_start_background_loop, args=(_shared_loop,), daemon=True)
+_loop_thread.start()
+
+# 3. Cloud Function Entry (Sync Wrapper)
 @functions_framework.http
-async def webhook(request):
+def webhook(request):
     signature = request.headers.get("X-Line-Signature")
     try:
-        # Request.get_data is Sync, but runs very fast
         body = request.get_data(as_text=True)
-        events = parser.parse(body, signature)
-        
-        tasks = []
-        for event in events:
-            if isinstance(event, MessageEvent) and isinstance(event.message, TextMessageContent):
-                tasks.append(handle_message(event))
-                
-        if tasks:
-            await asyncio.gather(*tasks)
+        # 委派給共用的 Event Loop 執行，確保所有 Lazy Singleton 都在同一個 Loop 中存活
+        future = asyncio.run_coroutine_threadsafe(
+            process_webhook_async(body, signature), _shared_loop
+        )
+        return future.result()
     except InvalidSignatureError:
         return "Invalid signature", 400
     except Exception as e:
         logger.error("Webhook Error: %s", e)
         return "Error", 500
-    return "OK"
 
 
-# 3. Message Handler (Async)
+async def process_webhook_async(body, signature):
+    events = parser.parse(body, signature)
+    
+    tasks = []
+    for event in events:
+        if isinstance(event, MessageEvent) and isinstance(event.message, TextMessageContent):
+            tasks.append(handle_message(event))
+            
+    if tasks:
+        await asyncio.gather(*tasks)
+    return "OK", 200
+# 4. Message Handler (Async)
 async def handle_message(event):
     user_msg = event.message.text.strip()
     source_type = event.source.type
