@@ -15,7 +15,7 @@ from linebot.v3.messaging import (
     TextMessage,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
-from linebot.v3.webhook import AsyncWebhookHandler
+from linebot.v3.webhook import WebhookParser
 
 # 引入你的 Agent 與 Services
 from src.agents.calendar import CalendarAgent
@@ -42,10 +42,18 @@ if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 
-# ✅ 冷啟動優化：在 Module Level 進行實例化，避免每次 Http Request 都重新分配資源
-handler = AsyncWebhookHandler(CHANNEL_SECRET)
-async_api_client = AsyncApiClient(configuration)
-line_bot_api = AsyncMessagingApi(async_api_client)
+# ✅ 冷啟動優化：利用 Lazy Singleton 避免每次 Request 重新分配資源，同時避免 Import 時拋出 event loop 錯誤
+parser = WebhookParser(CHANNEL_SECRET)
+
+_line_bot_api_instance = None
+
+async def get_line_bot_api():
+    global _line_bot_api_instance
+    if _line_bot_api_instance is None:
+        # 這裡有 event loop，初始化 aiohttp 才不會拋錯
+        async_api_client = AsyncApiClient(configuration)
+        _line_bot_api_instance = AsyncMessagingApi(async_api_client)
+    return _line_bot_api_instance
 
 router_llm = create_llm_provider(role="router")
 calendar_agent = CalendarAgent()
@@ -93,7 +101,15 @@ async def webhook(request):
     try:
         # Request.get_data is Sync, but runs very fast
         body = request.get_data(as_text=True)
-        await handler.handle(body, signature)
+        events = parser.parse(body, signature)
+        
+        tasks = []
+        for event in events:
+            if isinstance(event, MessageEvent) and isinstance(event.message, TextMessageContent):
+                tasks.append(handle_message(event))
+                
+        if tasks:
+            await asyncio.gather(*tasks)
     except InvalidSignatureError:
         return "Invalid signature", 400
     except Exception as e:
@@ -103,7 +119,6 @@ async def webhook(request):
 
 
 # 3. Message Handler (Async)
-@handler.add(MessageEvent, message=TextMessageContent)
 async def handle_message(event):
     user_msg = event.message.text.strip()
     source_type = event.source.type
@@ -175,8 +190,8 @@ async def handle_message(event):
         # 回覆 LINE
         # ==========================
         if reply_messages:
-            # 由於我們在 Module Level 初始化 AsyncMessagingApi，直接調用即可
-            await line_bot_api.reply_message(
+            api = await get_line_bot_api()
+            await api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token, messages=reply_messages
                 )
