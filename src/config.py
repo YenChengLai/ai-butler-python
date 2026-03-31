@@ -8,7 +8,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 
 # --- Gemini Model Configuration ---
 # Router: 求快，使用 Flash 系列
-GEMINI_ROUTER_MODEL_NAME = "gemini-3-flash-preview"
+GEMINI_ROUTER_MODEL_NAME = "gemini-2.5-flash-lite"
 # Agent: 求準，解析使用者語意，可用更強的模型
 GEMINI_AGENT_MODEL_NAME = "gemini-3-flash-preview"
 
